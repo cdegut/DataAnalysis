@@ -2,9 +2,7 @@
 import cv2 
 import numpy as np 
 from matplotlib import pyplot as plt
-from matplotlib import patches 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-#from matplotlib.widgets  import RectangleSelector
 import PIL.Image
 import customtkinter as ctk
 import glob
@@ -53,10 +51,15 @@ def highlight_supression(image, thresold=200):
 
 def cv2_draw_ROIs(image, bg_ROI=None, ROIs=None):
     if ROIs is not None:
+        font = cv2.FONT_HERSHEY_DUPLEX
+        i = 1
         for ROI in ROIs:
             image = cv2.rectangle( image, (ROI[0], ROI[1]), (ROI[0]+ROI[2], ROI[1]+ROI[3]), (0,0,255), 4)
+            image = cv2.putText(image, str(i), (ROI[0]+ROI[2], ROI[1]), font, fontScale=4, color=(0,0,255), thickness=6)
+            i = i+1
     if bg_ROI:
         image = cv2.rectangle( image, (bg_ROI[0], bg_ROI[1]), (bg_ROI[0]+bg_ROI[2], bg_ROI[1]+bg_ROI[3]), (0,255,255), 4)
+        image = cv2.putText(image, "Bg", (bg_ROI[0]+bg_ROI[2], bg_ROI[1]), font, fontScale=4, color=(0,255,255), thickness=6 )
     
     return image
 
@@ -66,6 +69,10 @@ def process_ROIs(image, ROIs):
     for ROI in ROIs:
         ROI_crop = image[int(ROI[1]):int(ROI[1]+ROI[3]),int(ROI[0]):int(ROI[0]+ROI[2])]
         (b_channel, g_channel, r_channel) = cv2.split(ROI_crop)
+
+        b_channel[b_channel != 0]
+        g_channel[g_channel != 0]
+        r_channel[r_channel != 0]
 
         b = np.mean(b_channel)
         b_std = np.std(b_channel)
@@ -317,7 +324,7 @@ class Interface(ctk.CTkFrame):
         for i in range(shape[1]):
             y = data_array[0:, i , 1 , 0]
             e = data_array[0:, i , 1 , 1]
-            ax.errorbar(x=x, y=y, yerr=e, linestyle='None', marker='.', elinewidth=1, color=color_list[i])
+            ax.errorbar(x=x, y=y, yerr=e, linestyle='None', marker='.', elinewidth=1, color=color_list[i], label=f"Box {i+1}")
             #plt_smooth(ax, y, x, 10, color=color_list[i])
             ax.legend()
         
