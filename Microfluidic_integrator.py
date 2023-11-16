@@ -6,8 +6,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import PIL.Image
 import customtkinter as ctk
 import glob
-
-
+from matplotlib.colors import to_rgb
+import time
 
 def background_value_determination(image, ROI, x_std=(2,2,2)):
     background = image[int(ROI[1]):int(ROI[1]+ROI[3]),int(ROI[0]):int(ROI[0]+ROI[2])]
@@ -19,6 +19,11 @@ def background_value_determination(image, ROI, x_std=(2,2,2)):
 
     return ( b_thresold, g_thresold, r_thresold)
 
+def pltcolor_to_cv2(color):
+    rgb = to_rgb(color)
+    rgb = [int(c*255) for c in rgb ]
+    bgr = (rgb[2], rgb[1], rgb[0])
+    return bgr
 
 def background_supression(image, thresolds, mode=2):
     
@@ -49,17 +54,21 @@ def highlight_supression(image, thresold=200):
 
     return clipped
 
-def cv2_draw_ROIs(image, bg_ROI=None, ROIs=None):
+def cv2_draw_ROIs(image, bg_ROI=None, ROIs=None, colors=None, bg_color=(205,0,0) ):
     if ROIs is not None:
         font = cv2.FONT_HERSHEY_DUPLEX
         i = 1
         for ROI in ROIs:
-            image = cv2.rectangle( image, (ROI[0], ROI[1]), (ROI[0]+ROI[2], ROI[1]+ROI[3]), (0,0,255), 4)
-            image = cv2.putText(image, str(i), (ROI[0]+ROI[2], ROI[1]), font, fontScale=4, color=(0,0,255), thickness=6)
+            if colors is not None:
+                color = colors[i-1]
+            else: 
+                color = (0,0,255)
+            image = cv2.rectangle( image, (ROI[0], ROI[1]), (ROI[0]+ROI[2], ROI[1]+ROI[3]), color, 4)
+            image = cv2.putText(image, str(i), (ROI[0]+ROI[2], ROI[1]), font, fontScale=4, color=color, thickness=6)
             i = i+1
     if bg_ROI:
-        image = cv2.rectangle( image, (bg_ROI[0], bg_ROI[1]), (bg_ROI[0]+bg_ROI[2], bg_ROI[1]+bg_ROI[3]), (0,255,255), 4)
-        image = cv2.putText(image, "Bg", (bg_ROI[0]+bg_ROI[2], bg_ROI[1]), font, fontScale=4, color=(0,255,255), thickness=6 )
+        image = cv2.rectangle( image, (bg_ROI[0], bg_ROI[1]), (bg_ROI[0]+bg_ROI[2], bg_ROI[1]+bg_ROI[3]), bg_color, 4)
+        image = cv2.putText(image, "Bg", (bg_ROI[0]+bg_ROI[2], bg_ROI[1]), font, fontScale=4, color=bg_color, thickness=6 )
     
     return image
 
@@ -129,14 +138,22 @@ class Interface(ctk.CTkFrame):
         self.default_clip_slider = 200
 
         self.images_list = glob.glob(f"{path}\\*.png")
+        self.total_images = len(self.images_list)
+        self.second_per_image = 5
         self.image = cv2.imread(self.images_list[0])
+        self.current_image = 1
 
 
         self.ROIs = []
 
+        self.color_list = ["crimson", "gold", "darkorchid", "darkgoldenrod"]
+        self.bg_color = pltcolor_to_cv2("mediumblue")
+        self.bgr_color_list = [pltcolor_to_cv2(color) for color in self.color_list]
+
         self.init_window()
 
     def init_window(self):
+        self.matplotlib_make_plot()
         self.bgr_sliders_draw((820, 10))
         self.clip_slider_draw((820, 190))
         self.images_slider_draw((400,600), 750)
@@ -164,14 +181,22 @@ class Interface(ctk.CTkFrame):
         self.ROIs_label.place(x=820, y = 540)
 
         self.display_image()
+        self.matplotlib_plot()
 
     def images_slider_draw(self, position, lengh):
         totalimages = len(self.images_list)
-        self.images_slider = ctk.CTkSlider(master = self.Tk_root, from_=0, to=totalimages-1, number_of_steps=totalimages-1, width=lengh, command=self.load_image, orientation=ctk.HORIZONTAL)
-        self.images_slider.place(x=position[0], y = position[1]+40, anchor=ctk.N)
+        self.images_slider = ctk.CTkSlider(master = self.Tk_root, from_=0, to=totalimages-1, number_of_steps=totalimages-1, width=lengh -80, command=self.load_image, orientation=ctk.HORIZONTAL)
+        self.images_slider.place(x=position[0], y = position[1]+30, anchor=ctk.N)
         self.images_slider.set(0)
         self.image_label = ctk.CTkLabel(master = self.Tk_root, text = "Image #: 1")
-        self.image_label.place(x=position[0]-380, y = position[1]) 
+        self.image_label.place(x=position[0]-310, y = position[1]) 
+        self.previous_image = ctk.CTkButton(master=self.Tk_root, text="Prev",width=60, command=lambda: self.load_image(self.current_image - 1))
+        self.previous_image.place(x=position[0]-370, y = position[1]+25, anchor=ctk.N)
+        self.next_image = ctk.CTkButton(master=self.Tk_root, text="Next",width=60, command=lambda: self.load_image(self.current_image + 1))
+        self.next_image.place(x=position[0]+370, y = position[1]+25, anchor=ctk.N)
+
+        self.forward = ctk.CTkButton(master=self.Tk_root, text="Play",width=60, command=self.play)
+        self.forward.place(x=position[0]+450, y = position[1]+25, anchor=ctk.N)        
 
     def bgr_sliders_draw(self, position):
         
@@ -221,9 +246,19 @@ class Interface(ctk.CTkFrame):
         self.clip_label.configure(text= f"Highlight clipping level: {self.clip_slider.get()}")
         self.after(100, self.label_update)
     
+    def play(self):
+        if self.current_image == self.total_images:
+            print("end")
+            return    
+        self.load_image(self.current_image + 1)
+        self.play_job = self.after(500, self.play)
+
+           
 
     def load_image(self, x):
         i = int(x)
+        self.images_slider.set(x)
+        self.current_image = i
         self.image = cv2.imread(self.images_list[i])
         self.image_label.configure(text=f"Image #: {i+1}")
         self.redraw()
@@ -257,14 +292,15 @@ class Interface(ctk.CTkFrame):
         image = self.process_display_image()
         
         if self.ROIs is not None:
-            self.update_ROIs_label(image)
+            ROIs_data = process_ROIs(image, self.ROIs)
+            self.update_ROIs_label(ROIs_data)
+            self.matplotlib_plot(np.array([ROIs_data]))
 
         self.label_display_image(image)
 
     
-    def update_ROIs_label(self, image):
+    def update_ROIs_label(self, ROIs_data):
         
-        ROIs_data = process_ROIs(image, self.ROIs)
         text = "ROIs integration data:\n"
         i = 1
         for ROI_data in ROIs_data:
@@ -287,7 +323,7 @@ class Interface(ctk.CTkFrame):
 
     
     def label_display_image(self, image):
-        image = cv2_draw_ROIs(image, bg_ROI = self.bg_ROI, ROIs= self.ROIs)
+        image = cv2_draw_ROIs(image, bg_ROI = self.bg_ROI, ROIs= self.ROIs, colors=self.bgr_color_list)
         color_convert = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         PIL_image = PIL.Image.fromarray(color_convert) 
         display = ctk.CTkImage(PIL_image, size=(800,600))
@@ -307,28 +343,38 @@ class Interface(ctk.CTkFrame):
         
         self.matplotlib_plot(data_array)
     
-    def matplotlib_plot(self, data_array):
+    def matplotlib_make_plot(self):
+        self.fig, self.ax = plt.subplots()
+        self.fig.set_dpi(100) # i inch = 100px
+        self.fig.set_size_inches(8,3)
+        self.ax.set_position([0.08, 0.15, 0.8, 0.8])
+        self.ax.spines[['right', 'top']].set_visible(False)
+        self.ax.set_xlabel("Time(s)")
+        self.ax.set_ylabel("avg px intensity")
+        self.ax.set_xlim(left=0, right= self.total_images*self.second_per_image)
+    
+    def matplotlib_plot(self, data_array=None):
 
-        fig, ax = plt.subplots()
-        fig.set_size_inches(8,3)
-        fig.set_dpi(100)
-        #fig.margins(x=0,y=0)
-        #fig.subplots_adjust(bottom=0.1, right=0.8, top=0.9)
-        #fig.axes((0.0, 0.0, 0.0, 0))
-        fig.gca().set_position([0.1, 0.1, 0.9, 0.9])
 
-        shape = data_array.shape
-        x = range(1, shape[0]+1)
 
-        color_list = ("firebrick", "olivedrab", "steelblue", "dimgrey")
-        for i in range(shape[1]):
-            y = data_array[0:, i , 1 , 0]
-            e = data_array[0:, i , 1 , 1]
-            ax.errorbar(x=x, y=y, yerr=e, linestyle='None', marker='.', elinewidth=1, color=color_list[i], label=f"Box {i+1}")
-            #plt_smooth(ax, y, x, 10, color=color_list[i])
-            ax.legend()
+        if data_array is not None:
+            shape = data_array.shape
+            if shape[0] == 1:
+                x = self.second_per_image * (self.current_image - 1)
+            else:
+                x = [i*self.second_per_image for i in range(1, shape[0]+1)]
+            
+            for i in range(shape[1]):
+                y = data_array[0:, i , 1 , 0]
+                e = data_array[0:, i , 1 , 1]
+                self.ax.errorbar(x=x, y=y, yerr=e, linestyle='None', marker='.', elinewidth=1, color=self.color_list[i], label=f"Box {i+1}")
+                #plt_smooth(ax, y, x, 10, color=color_list[i])
+            
+        handles, labels = self.ax.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        self.ax.legend(by_label.values(), by_label.keys())
         
-        canvas = FigureCanvasTkAgg(fig, master=self.Tk_root)
+        canvas = FigureCanvasTkAgg(self.fig, master=self.Tk_root)
         canvas.draw()
         canvas.get_tk_widget().place(x=10,y=660)
 
@@ -340,7 +386,7 @@ if __name__ == "__main__":
     
     path = "D:\\microscope_data\\time-lapse\\231030_154809\\"
     Tk_root = ctk.CTk()
-    Tk_root.geometry("1050x960")
+    Tk_root.geometry("1050x980+0+0")
     interface = Interface(Tk_root, path)       
     Tk_root.mainloop()
 
