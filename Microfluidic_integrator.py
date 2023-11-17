@@ -7,7 +7,6 @@ import PIL.Image
 import customtkinter as ctk
 import glob
 from matplotlib.colors import to_rgb
-import time
 
 def background_value_determination(image, ROI, x_std=(2,2,2)):
     background = image[int(ROI[1]):int(ROI[1]+ROI[3]),int(ROI[0]):int(ROI[0]+ROI[2])]
@@ -55,8 +54,9 @@ def highlight_supression(image, thresold=200):
     return clipped
 
 def cv2_draw_ROIs(image, bg_ROI=None, ROIs=None, colors=None, bg_color=(205,0,0) ):
+    font = cv2.FONT_HERSHEY_DUPLEX
     if ROIs is not None:
-        font = cv2.FONT_HERSHEY_DUPLEX
+        
         i = 1
         for ROI in ROIs:
             if colors is not None:
@@ -97,8 +97,8 @@ def process_ROIs(image, ROIs):
     return ROIs_data
     
 def folder_process(thresolds, clip, ROIs, path="D:\\microscope_data\\time-lapse\\231030_154809\\"):
-    cv2.namedWindow("Image", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("Image", 800, 600)
+    #cv2.namedWindow("Image", cv2.WINDOW_NORMAL)
+    #cv2.resizeWindow("Image", 800, 600)
 
     data = []
 
@@ -117,11 +117,10 @@ def folder_process(thresolds, clip, ROIs, path="D:\\microscope_data\\time-lapse\
         
 
         current_image = cv2_draw_ROIs(current_image, bg_ROI = None, ROIs=ROIs)
-        cv2.imshow("Image", current_image)
-        cv2.waitKey(10)
+        #cv2.imshow("Image", current_image)
+        #cv2.waitKey(10)
     data_array = np.array(data)
-    print(data_array)
-    cv2.destroyWindow("Image")
+    #cv2.destroyWindow("Image")
     return data_array
         
         
@@ -143,12 +142,13 @@ class Interface(ctk.CTkFrame):
         self.image = cv2.imread(self.images_list[0])
         self.current_image = 1
 
-
-        self.ROIs = []
+        self.ROIs = None
 
         self.color_list = ["crimson", "gold", "darkorchid", "darkgoldenrod"]
         self.bg_color = pltcolor_to_cv2("mediumblue")
         self.bgr_color_list = [pltcolor_to_cv2(color) for color in self.color_list]
+
+        self.data_array = np.zeros((self.total_images,1,3,2))
 
         self.init_window()
 
@@ -251,9 +251,7 @@ class Interface(ctk.CTkFrame):
             print("end")
             return    
         self.load_image(self.current_image + 1)
-        self.play_job = self.after(500, self.play)
-
-           
+        self.play_job = self.after(500, self.play)          
 
     def load_image(self, x):
         i = int(x)
@@ -267,7 +265,7 @@ class Interface(ctk.CTkFrame):
         cv2.namedWindow("Image", cv2.WINDOW_NORMAL)
         cv2.resizeWindow("Image", 800, 600)
         self.bg_ROI = cv2.selectROI("Image", self.image)
-        cv2.destroyWindow("Image")
+        self.clear_plot_array()
         self.display_image()
     
     def cv2_ROIs_selector(self):
@@ -276,8 +274,17 @@ class Interface(ctk.CTkFrame):
         image = self.process_display_image()
         self.ROIs = cv2.selectROIs("Image", image)
         cv2.destroyWindow("Image")
+        self.clear_plot_array()
         self.display_image()
 
+    def clear_plot_array(self):
+        try:
+            self.data_array = np.zeros((self.total_images, len(self.ROIs), 3, 2))
+        except:
+            self.data_array = np.zeros((self.total_images, 1, 3, 2))
+
+        self.data_array[ self.data_array==0 ] = np.nan
+        self.matplotlib_make_plot()
 
     def redraw(self, x=None):
         
@@ -293,6 +300,7 @@ class Interface(ctk.CTkFrame):
         
         if self.ROIs is not None:
             ROIs_data = process_ROIs(image, self.ROIs)
+            self.data_array[self.current_image - 1] = ROIs_data
             self.update_ROIs_label(ROIs_data)
             self.matplotlib_plot(np.array([ROIs_data]))
 
@@ -354,8 +362,6 @@ class Interface(ctk.CTkFrame):
         self.ax.set_xlim(left=0, right= self.total_images*self.second_per_image)
     
     def matplotlib_plot(self, data_array=None):
-
-
 
         if data_array is not None:
             shape = data_array.shape
