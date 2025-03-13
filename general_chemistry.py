@@ -91,7 +91,7 @@ def acid_graph(pKa1, pKa2, pH, total):
     ax.plot(l[:,0], l[:,3], label="H2A")
     ax.legend()
 
-def get_eq_point(reaction , equilibrium_point, tolerance ):
+def get_eq_point(reaction , equilibrium_point, tolerance, AB):
     B_init = reaction[0][2]
     
     if B_init < equilibrium_point:
@@ -104,8 +104,9 @@ def get_eq_point(reaction , equilibrium_point, tolerance ):
             if data_point[2] < equilibrium_point + equilibrium_point*(1-tolerance):
                 return data_point
 
-
+    '''
     print(f"final values:\n{A_name}: {reaction[-1][1]:.2f}\n{B_name}: {reaction[-1][2]:.2f}\nk = {k_reaction}")
     tolerance = 0.01
     eq_time = get_eq_point(reaction, equilibrium_point, tolerance)
     print(f"Reaction reach equilibrium within {tolerance*100}% at {eq_time[2]:.2f}s")
+    '''
