@@ -1,52 +1,61 @@
-import dearpygui.dearpygui as dpg
+from typing import List
 import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks, savgol_filter
-from scipy.sparse import csc_matrix, diags, spdiags
-from scipy.sparse.linalg import spsolve
 import scipy.optimize as opt
 from scipy.integrate import quad
 from modules.msdata_class import MSData, peak_params
 from modules.helpers import multi_bi_gaussian, bi_gaussian
+import dearpygui.dearpygui as dpg
+from modules.var import colors_list
 
+log_string = ""
+def log(message:str) -> None:   
+    global log_string
+    log_string += message + "\n"
+    dpg.set_value("message_box", log_string)
 
-spectrum = MSData()
-spectrum.import_csv(rf"D:\MassSpec\Um_data.csv")
-
-def data_clipper(sender, app_data):
+def data_clipper(sender = None, app_data = None, user_data:MSData = None):
+    spectrum = user_data
     L_clip = dpg.get_value("L_data_clipping")
     R_clip = dpg.get_value("R_data_clipping")
     if L_clip >= R_clip:
         return
+    
     spectrum.clip_data(L_clip, R_clip)
     dpg.set_value("original_series", [spectrum.working_data[:,0].tolist(), spectrum.working_data[:,1].tolist()])
     dpg.set_value("corrected_series_plot2", [spectrum.baseline_corrected_clipped[:,0].tolist(), spectrum.baseline_corrected_clipped[:,1].tolist()])
-    filter_data()
+    dpg.set_value("corrected_series_plot3", [spectrum.baseline_corrected_clipped[:,0].tolist(), spectrum.baseline_corrected_clipped[:,1].tolist()])
+    filter_data(user_data=spectrum)
 
-    if len(spectrum.working_data) > 0:
-        dpg.set_axis_limits("x_axis_plot1", L_clip, R_clip)
-        dpg.set_axis_limits("y_axis_plot1", min(spectrum.working_data[:,1]) - 0.1, max(spectrum.working_data[:,1]))
-        dpg.set_axis_limits("x_axis_plot2", L_clip, R_clip)
-        dpg.set_axis_limits("y_axis_plot2", min(spectrum.baseline_corrected_clipped[:,1]) - 0.1, max(spectrum.baseline_corrected_clipped[:,1]))
+    dpg.set_axis_limits("x_axis_plot1", L_clip, R_clip)
+    dpg.set_axis_limits("y_axis_plot1", min(spectrum.working_data[:,1]) - 0.1, max(spectrum.working_data[:,1]))
+    dpg.set_axis_limits("x_axis_plot2", L_clip, R_clip)
+    dpg.set_axis_limits("y_axis_plot2", min(spectrum.baseline_corrected_clipped[:,1]) - 0.1, max(spectrum.baseline_corrected_clipped[:,1]))
+    dpg.set_axis_limits("x_axis_plot3", L_clip, R_clip)
+    dpg.set_axis_limits("y_axis_plot3", min(spectrum.baseline_corrected_clipped[:,1]) - 0.1, max(spectrum.baseline_corrected_clipped[:,1]))
     
-def filter_data(sender = None, app_data = None):
+def filter_data(sender = None, app_data = None, user_data:MSData = None):
+    spectrum = user_data
     window_length = dpg.get_value("smoothing_window")
     spectrum.filter_data(window_length)
     dpg.set_value("filtered_series", [spectrum.filtered[:,0].tolist(), spectrum.filtered[:,1].tolist()])
 
-def toggle_baseline(sender = None, app_data = None):
+def toggle_baseline(sender = None, app_data = None, user_data:MSData = None):
+    spectrum = user_data
     spectrum.baseline_toggle = not spectrum.baseline_toggle
     correct_baseline()
 
-def correct_baseline(sender = None, app_data = None):    
+def correct_baseline(sender = None, app_data = None, user_data:MSData = None):
+    spectrum = user_data    
     window = dpg.get_value("baseline_window")
     spectrum.correct_baseline(window)
     dpg.set_value("baseline", [spectrum.baseline[:,0].tolist(), spectrum.baseline[:,1].tolist()])
     dpg.set_value("corrected_series_plot2", [spectrum.baseline_corrected[:,0].tolist(), spectrum.baseline_corrected[:,1].tolist()])
     dpg.set_axis_limits("y_axis_plot2", min(spectrum.baseline_corrected_clipped[:,1]) - 1, max(spectrum.baseline_corrected_clipped[:,1]))
 
-
-def peaks_finder():
+def peaks_finder(sender = None, app_data = None, user_data:MSData = None):
+    spectrum = user_data
     # Assuming y_data and baseline_curve are already defined
     threshold = dpg.get_value("peak_detection_threshold")
     width = dpg.get_value("peak_detection_width")
@@ -91,13 +100,14 @@ def peaks_finder():
     
     peaks_centers = spectrum.working_data[:,0][peaks]
     print(f"Detected {len(peaks)} peaks at x = {peaks_centers}")
+    log(f"Detected {len(peaks)} peaks at x = {peaks_centers}")
 
     if dpg.does_item_exist("peak_lines"):
         dpg.delete_item("peak_lines")   
     dpg.add_inf_line_series(peaks_centers, parent="y_axis_plot1", tag="peak_lines")
 
-
-def multi_bigaussian_fit():
+def multi_bigaussian_fit(sender = None, app_data = None, user_data:MSData = None):
+    spectrum = user_data
 
     def try_to_fit(data_x:pd.Series, data_y:pd.Series, initial_params, downsample:int = 1):
         try:
@@ -150,8 +160,8 @@ def multi_bigaussian_fit():
             print("Error - Initial curve_fit failed")
             return
         else:
-            update_peak_params(working_peak_list, popt)
-            draw_fitted_peaks()
+            update_peak_params(working_peak_list, popt, spectrum)
+            draw_fitted_peaks(None, None, spectrum)
     
     else:
         popt = initial_params
@@ -164,8 +174,8 @@ def multi_bigaussian_fit():
         if popt is None:
             return
         else:
-            update_peak_params(working_peak_list, popt)
-            draw_fitted_peaks()
+            update_peak_params(working_peak_list, popt, spectrum)
+            draw_fitted_peaks(None, None, spectrum)
     
     # Final fitting with full resolution data
     popt = try_to_fit(spectrum.baseline_corrected_clipped[:,0], spectrum.baseline_corrected_clipped[:,1], popt)
@@ -173,11 +183,11 @@ def multi_bigaussian_fit():
     if popt is None:
         return
     
-    update_peak_params(working_peak_list, popt)
-    draw_fitted_peaks()
+    update_peak_params(working_peak_list, popt, spectrum)
+    draw_fitted_peaks(None, None, spectrum)
     print("Final fitting with full resolution data done")
 
-def update_peak_params(peak_list, popt):
+def update_peak_params(peak_list, popt, spectrum:MSData):
     i = 0
     for peak in peak_list:
         A_fit, x0_fit, sigma_L_fit, sigma_R_fit = popt[i*4:(i+1)*4]
@@ -187,7 +197,8 @@ def update_peak_params(peak_list, popt):
         spectrum.peaks[peak].sigma_R = sigma_R_fit
         i += 1
 
-def draw_fitted_peaks():
+def draw_fitted_peaks(sender = None, app_data = None, user_data:MSData = None):
+    spectrum = user_data
     # Delete previous peaks
     for alias in dpg.get_aliases():
         if alias.startswith("fitted_peak_") or alias.startswith("peak_annotation_"):
@@ -225,9 +236,9 @@ def draw_fitted_peaks():
     else:
         dpg.set_value("fitted_series", [x_fit, y_fit])
     
-    update_peak_table()
+    update_peak_table(spectrum)
 
-def update_peak_table():
+def update_peak_table(spectrum:MSData):
     for tag in dpg.get_item_children("peak_table")[1]:
         dpg.delete_item(tag)
 
@@ -244,82 +255,28 @@ def update_peak_table():
             dpg.add_text(f"{integral:.2f}")
 
 
+def draw_mz_lines(sender = None, app_data = None, user_data:int = 0):
+    k = user_data
+    for alias in dpg.get_aliases():
+        if alias.startswith(f"peak_annotation_{k}"):
+            dpg.delete_item(alias)
+
+
+    mw:int = dpg.get_value(f"molecular_weight_{k}")
+    charges:int = dpg.get_value(f"charges_{k}")
+    nb_peak_show:int = dpg.get_value(f"nb_peak_show_{k}")
+    n = nb_peak_show // 2
+
+    l = []
+    for i in range(-n,n+1):
+        z = charges + i
+        mz = (mw + z*0.01 ) / z
+        l.append(mz)
+        dpg.add_plot_annotation(label=f"{z}+", default_value=(mz, 0), offset=(-15, -15), color=colors_list[k], clamped=False, parent="peak_matching_plot", tag=f"peak_annotation_{k}_{mz}")
+
+    if dpg.does_item_exist(f"mz_lines_{k}"):
+        dpg.delete_item(f"mz_lines_{k}")
+    dpg.add_inf_line_series(l, parent="y_axis_plot3", tag=f"mz_lines_{k}")
+    dpg.bind_item_theme(f"mz_lines_{k}", f"mz_line_theme_{k}")
 
     
-
-# Create a Dear PyGui context
-dpg.create_context()
-
-
-with dpg.window(label="Control", width=1450, height= 10, no_close=True, no_collapse=True, no_move=True, no_resize=True):
-    # Add a slider to adjust the window length
-    with dpg.group(horizontal=True, horizontal_spacing= 50):
-        dpg.add_text("Data Clipping:")
-        min_value = min(spectrum.original_data[:,0])
-        max_value = max(spectrum.original_data[:,0])
-        dpg.add_slider_int(label="Data clipping left", width=400, default_value=min_value, min_value=min_value, max_value=max_value, tag="L_data_clipping", callback=data_clipper)
-        dpg.add_slider_int(label="Data clipping right", width=400, default_value=max_value, min_value=min_value, max_value=max_value, tag="R_data_clipping", callback=data_clipper)
-    
-# Create a window
-with dpg.window(label="Data Filtering and peak finding",width=1430, pos=(0,100), no_close=True, no_move=True, no_resize=True, tag="Data Filtering"):
-    
-    # Create a plot for the data
-    with dpg.plot(label="Data Filtering", width=1430, height=600, tag="data_plot") as plot1:
-        # Add x and y axes
-        x_axis = dpg.add_plot_axis(dpg.mvXAxis, label="m/z", tag= "x_axis_plot1")
-        y_axis = dpg.add_plot_axis(dpg.mvYAxis, label="Y Axis", tag = "y_axis_plot1")
-        
-        dpg.add_line_series(spectrum.working_data[:,0].tolist(), spectrum.working_data[:,1].tolist(), label="Original Data Series", parent=y_axis, tag="original_series")
-        dpg.add_line_series(spectrum.filtered[:,0].tolist(), spectrum.filtered[:,1].tolist(), label="Filtered Data Series", parent=y_axis, tag="filtered_series")
-        dpg.add_line_series(spectrum.baseline[:,0].tolist(), spectrum.baseline[:,1].tolist(), label="Snip Baseline", parent=y_axis, tag="baseline")  
-        
-    dpg.add_text("Data Filtering:")
-    dpg.add_slider_int(label="Smoothing Window", default_value=100, min_value=3, max_value=1000, callback=filter_data, tag="smoothing_window")
-    dpg.add_text("Baseline estimation:")
-    with dpg.group(horizontal=True, horizontal_spacing= 50):
-        dpg.add_button(label="Toggle Baseline", callback=toggle_baseline)
-        dpg.add_slider_int(label="Baseline window", default_value=500, min_value=100, max_value=1000, tag="baseline_window")
-        dpg.add_button(label="Update Baseline", callback=correct_baseline)
-      
-    dpg.add_text("Peak detection:")
-    dpg.add_slider_int(label="Peak detection distance from baseline", default_value=100, min_value=1, max_value=300, tag="peak_detection_threshold")
-    dpg.add_slider_int(label="Peak width", default_value=200, min_value=1, max_value=600, tag="peak_detection_width")
-    dpg.add_slider_int(label="Peak min distance", default_value=1000, min_value=1, max_value=1000, tag="peak_detection_distance")
-    dpg.add_button(label="Find Peaks", callback=peaks_finder)
-
-
-with dpg.window(label="Peak fitting", width=1430, height=900, pos=(0,120), no_close=True, no_move=True, no_resize=True):
-    # Create a plot for the raw data
-    with dpg.plot(label="Gaussian Fit", width=1430, height=600, tag="gaussian_fit_plot") as plot2:
-        # Add x and y axes
-        dpg.add_plot_axis(dpg.mvXAxis, label="m/z", tag="x_axis_plot2")
-        dpg.add_plot_axis(dpg.mvYAxis, label="Y Axis", tag="y_axis_plot2")
-        
-        # Add the raw data series to the plot
-        dpg.add_line_series(spectrum.baseline_corrected_clipped[:,0], spectrum.baseline_corrected_clipped[:,1], label="Corrected Data Series", parent="y_axis_plot2", tag="corrected_series_plot2")
-    
-    with dpg.group(horizontal=True, horizontal_spacing= 50):
-        dpg.add_button(label="Multi Fit Gaussians", callback=multi_bigaussian_fit)
-        dpg.add_button(label="Redraw Peaks", callback=draw_fitted_peaks)
-        
-    with dpg.table(header_row=True, tag="peak_table"):
-        dpg.add_table_column(label="Peak Label")
-        dpg.add_table_column(label="Peak Start")
-        dpg.add_table_column(label="Peak Apex")
-        dpg.add_table_column(label="Peak Integral")
-
-# Import the custom theme
-from modules.dpg_style import general_theme, data_theme
-dpg.bind_theme(general_theme)
-dpg.bind_item_theme("original_series", data_theme)
-dpg.bind_item_theme("corrected_series_plot2", data_theme)
-
-# Create a viewport and show the plot
-dpg.create_viewport(title='Multi Bi Gaussian Fit', width=1450, height=1000)
-dpg.focus_item("Data Filtering")
-dpg.show_style_editor()
-dpg.show_metrics()
-dpg.setup_dearpygui()
-dpg.show_viewport()
-dpg.start_dearpygui()
-dpg.destroy_context()

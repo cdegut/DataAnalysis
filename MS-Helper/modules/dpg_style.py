@@ -1,4 +1,5 @@
 import dearpygui.dearpygui as dpg
+from modules.var import colors_list
 
 with dpg.theme() as general_theme:
     with dpg.theme_component(dpg.mvAll):
@@ -10,3 +11,11 @@ with dpg.theme() as data_theme:
     with dpg.theme_component(dpg.mvAll):
         dpg.add_theme_style(dpg.mvPlotStyleVar_LineWeight, 1, category=dpg.mvThemeCat_Plots)
         dpg.add_theme_color(dpg.mvPlotCol_Line, (100, 100, 100), category=dpg.mvThemeCat_Plots)
+i = 0
+for color in colors_list:
+    with dpg.theme(tag = f"mz_line_theme_{i}"):
+        with dpg.theme_component(dpg.mvInfLineSeries):
+            dpg.add_theme_style(dpg.mvPlotStyleVar_LineWeight, 1, category=dpg.mvThemeCat_Plots)
+            dpg.add_theme_color(dpg.mvPlotCol_Line, color, category=dpg.mvThemeCat_Plots)
+    i += 1
+
