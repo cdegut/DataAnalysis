@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from dataclasses import dataclass
 from typing import Dict
+from time import time 
 
 # Define a class to store mass spectrometry data
 class MSData():
@@ -16,6 +17,7 @@ class MSData():
         self.peaks: Dict[int : peak_params] = {}
         self.baseline_toggle = False
         self.baseline_corrected_clipped = None
+        self.last_baseline_corrected = time()
     
     def import_csv(self, path:str):
         data = pd.read_csv(path)
@@ -43,6 +45,7 @@ class MSData():
             self.baseline_corrected = self.working_data
             self.baseline_corrected_clipped = self.working_data
             self.baseline = np.column_stack((self.working_data[:,0], [0]*len(self.working_data)))
+            self.last_baseline_corrected = time()
             return
           
         baseline_fitter = Baseline(x_data=self.working_data[:,0])
@@ -50,6 +53,7 @@ class MSData():
         self.baseline = np.column_stack((self.working_data[:,0], bkg_4 ))
         self.baseline_corrected = np.column_stack((self.working_data[:,0], self.working_data[:,1] - bkg_4))
         self.baseline_corrected_clipped = self.baseline_corrected
+        self.last_baseline_corrected = time()
     
     def guess_sampling_rate(self):
         sampling_rate = np.mean(np.diff(self.working_data[:,0]))

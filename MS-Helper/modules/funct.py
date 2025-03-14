@@ -1,4 +1,6 @@
 from typing import List
+from cv2 import threshold
+from networkx import sigma
 import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks, savgol_filter
@@ -8,6 +10,7 @@ from modules.msdata_class import MSData, peak_params
 from modules.helpers import multi_bi_gaussian, bi_gaussian
 import dearpygui.dearpygui as dpg
 from modules.var import colors_list
+from time import time
 
 log_string = ""
 def log(message:str) -> None:   
@@ -28,12 +31,12 @@ def data_clipper(sender = None, app_data = None, user_data:MSData = None):
     dpg.set_value("corrected_series_plot3", [spectrum.baseline_corrected_clipped[:,0].tolist(), spectrum.baseline_corrected_clipped[:,1].tolist()])
     filter_data(user_data=spectrum)
 
-    dpg.set_axis_limits("x_axis_plot1", L_clip, R_clip)
-    dpg.set_axis_limits("y_axis_plot1", min(spectrum.working_data[:,1]) - 0.1, max(spectrum.working_data[:,1]))
-    dpg.set_axis_limits("x_axis_plot2", L_clip, R_clip)
-    dpg.set_axis_limits("y_axis_plot2", min(spectrum.baseline_corrected_clipped[:,1]) - 0.1, max(spectrum.baseline_corrected_clipped[:,1]))
-    dpg.set_axis_limits("x_axis_plot3", L_clip, R_clip)
-    dpg.set_axis_limits("y_axis_plot3", min(spectrum.baseline_corrected_clipped[:,1]) - 0.1, max(spectrum.baseline_corrected_clipped[:,1]))
+    dpg.fit_axis_data("y_axis_plot1")
+    dpg.fit_axis_data("x_axis_plot1")
+    dpg.fit_axis_data("y_axis_plot2")
+    dpg.fit_axis_data("x_axis_plot2")
+    dpg.fit_axis_data("y_axis_plot3")
+    dpg.fit_axis_data("x_axis_plot3")
     
 def filter_data(sender = None, app_data = None, user_data:MSData = None):
     spectrum = user_data
@@ -44,15 +47,18 @@ def filter_data(sender = None, app_data = None, user_data:MSData = None):
 def toggle_baseline(sender = None, app_data = None, user_data:MSData = None):
     spectrum = user_data
     spectrum.baseline_toggle = not spectrum.baseline_toggle
-    correct_baseline()
+    correct_baseline(None, None, spectrum)
 
 def correct_baseline(sender = None, app_data = None, user_data:MSData = None):
-    spectrum = user_data    
-    window = dpg.get_value("baseline_window")
-    spectrum.correct_baseline(window)
-    dpg.set_value("baseline", [spectrum.baseline[:,0].tolist(), spectrum.baseline[:,1].tolist()])
-    dpg.set_value("corrected_series_plot2", [spectrum.baseline_corrected[:,0].tolist(), spectrum.baseline_corrected[:,1].tolist()])
-    dpg.set_axis_limits("y_axis_plot2", min(spectrum.baseline_corrected_clipped[:,1]) - 1, max(spectrum.baseline_corrected_clipped[:,1]))
+    spectrum = user_data
+    if time() - spectrum.last_baseline_corrected < 0.5:
+        return
+    else:
+        window = dpg.get_value("baseline_window")
+        spectrum.correct_baseline(window)
+        dpg.set_value("baseline", [spectrum.baseline[:,0].tolist(), spectrum.baseline[:,1].tolist()])
+        dpg.set_value("corrected_series_plot2", [spectrum.baseline_corrected[:,0].tolist(), spectrum.baseline_corrected[:,1].tolist()])
+        dpg.set_axis_limits("y_axis_plot2", min(spectrum.baseline_corrected_clipped[:,1]) - 1, max(spectrum.baseline_corrected_clipped[:,1]))
 
 def peaks_finder(sender = None, app_data = None, user_data:MSData = None):
     spectrum = user_data
@@ -68,7 +74,7 @@ def peaks_finder(sender = None, app_data = None, user_data:MSData = None):
     filtered_clipped = spectrum.filtered[(spectrum.filtered[:,0] > L_clip) & (spectrum.filtered[:,0] < R_clip)]
     
     if len(spectrum.working_data[:,0]) > len(spectrum.baseline):
-        correct_baseline()     
+        correct_baseline(None, None, spectrum)     
     baseline_clipped = spectrum.baseline[(spectrum.baseline[:,0] > L_clip) & (spectrum.baseline[:,0] < R_clip)]
     
     filtered_thresolded = np.where(np.abs(filtered_clipped[:,1] - baseline_clipped[:,1]) <= threshold, 0, (filtered_clipped[:,1] - baseline_clipped[:,1]))
@@ -106,19 +112,7 @@ def peaks_finder(sender = None, app_data = None, user_data:MSData = None):
         dpg.delete_item("peak_lines")   
     dpg.add_inf_line_series(peaks_centers, parent="y_axis_plot1", tag="peak_lines")
 
-def multi_bigaussian_fit(sender = None, app_data = None, user_data:MSData = None):
-    spectrum = user_data
-
-    def try_to_fit(data_x:pd.Series, data_y:pd.Series, initial_params, downsample:int = 1):
-        try:
-            popt, _ = opt.curve_fit(multi_bi_gaussian, data_x[::downsample], data_y[::downsample], p0=initial_params)
-            print(f"fitting done with downsampling of {downsample}")
-            return popt
-        
-        except RuntimeError:
-            print(f"Error - curve_fit failed with downsampling of {downsample}")
-            return None
-    
+def initial_peaks_parameters(spectrum):
     initial_params = []
     working_peak_list = []
     i = 0
@@ -146,6 +140,34 @@ def multi_bigaussian_fit(sender = None, app_data = None, user_data:MSData = None
         print("No peaks are within the data range. Please adjust the peak detection parameters")
         return
     
+    if dpg.get_value("extra_bl"):
+        #extra BL peak
+        A=max(spectrum.working_data[:,1])*0.1
+        x0=spectrum.working_data[:,0][0] + (spectrum.working_data[:,0][-1] - spectrum.working_data[:,0][0]) / 2
+        sigma_L = sigma_R = (spectrum.working_data[:,0][-1] - spectrum.working_data[:,0][0]) / 4
+        initial_params.extend([A, x0, sigma_L, sigma_R])
+        new_peak_index =  min(list(spectrum.peaks.keys())) -1
+        working_peak_list.append(new_peak_index)
+        print(f"Peak BL: A = {A:.3f}, x0 = {x0:.3f}, sigma_L = {sigma_L:.3f}, sigma_R = {sigma_R:.3f}")
+
+
+    return initial_params, working_peak_list
+
+def multi_bigaussian_fit(sender = None, app_data = None, user_data:MSData = None):
+    spectrum = user_data
+
+    initial_params, working_peak_list = initial_peaks_parameters(spectrum)
+
+    def try_to_fit(data_x:pd.Series, data_y:pd.Series, initial_params, downsample:int = 1):
+        try:
+            popt, _ = opt.curve_fit(multi_bi_gaussian, data_x[::downsample], data_y[::downsample], p0=initial_params)
+            print(f"fitting done with downsampling of {downsample}")
+            return popt
+        
+        except RuntimeError:
+            print(f"Error - curve_fit failed with downsampling of {downsample}")
+            return None
+
     print("Peak list:", working_peak_list)
 
     window = dpg.get_value( "smoothing_window")
@@ -187,10 +209,37 @@ def multi_bigaussian_fit(sender = None, app_data = None, user_data:MSData = None
     draw_fitted_peaks(None, None, spectrum)
     print("Final fitting with full resolution data done")
 
+def rolling_window_fit(sender = None, app_data = None, user_data:MSData = None):
+    spectrum = user_data
+    initial_params, working_peak_list = initial_peaks_parameters(spectrum)
+    
+    window = dpg.get_value("rolling_window")
+    i = 0
+    for peak in working_peak_list:
+        A_guess, x0_guess, sigma_L_guess, sigma_R_guess =  initial_params[i*4:(i+1)*4]
+        initial_param = [A_guess, x0_guess, sigma_L_guess, sigma_R_guess]
+        data_x = spectrum.working_data[:,0]
+        data_y = spectrum.baseline_corrected_clipped[:,1]
+        mask = (data_x >= x0_guess - window) & (data_x <= x0_guess + window)
+        data_x = data_x[mask]
+        data_y = data_y[mask]
+        popt, _ = opt.curve_fit(bi_gaussian, data_x, data_y, p0=initial_param)
+        spectrum.peaks[peak].A = popt[0]
+        spectrum.peaks[peak].x0_refined = popt[1]
+        spectrum.peaks[peak].sigma_L = popt[2]
+        spectrum.peaks[peak].sigma_R = popt[3]
+        i += 1
+
+    draw_fitted_peaks(None, None, spectrum)
+
 def update_peak_params(peak_list, popt, spectrum:MSData):
     i = 0
-    for peak in peak_list:
-        A_fit, x0_fit, sigma_L_fit, sigma_R_fit = popt[i*4:(i+1)*4]
+    for peak in peak_list:   
+        A_fit, x0_fit, sigma_L_fit, sigma_R_fit = popt[i*4:(i+1)*4]     
+        if peak < 0:           
+            spectrum.peaks[peak] = peak_params(A=A_fit, x0_init=x0_fit, x0_refined=x0_fit, sigma_L=sigma_L_fit, sigma_R=sigma_R_fit, width=sigma_L_fit + sigma_R_fit)
+            i += 1
+            continue
         spectrum.peaks[peak].A = A_fit
         spectrum.peaks[peak].x0_refined = x0_fit
         spectrum.peaks[peak].sigma_L = sigma_L_fit
@@ -260,23 +309,82 @@ def draw_mz_lines(sender = None, app_data = None, user_data:int = 0):
     for alias in dpg.get_aliases():
         if alias.startswith(f"peak_annotation_{k}"):
             dpg.delete_item(alias)
-
+    
 
     mw:int = dpg.get_value(f"molecular_weight_{k}")
     charges:int = dpg.get_value(f"charges_{k}")
     nb_peak_show:int = dpg.get_value(f"nb_peak_show_{k}")
     n = nb_peak_show // 2
 
-    l = []
+    mz_l = []
+    z_l = []
+
     for i in range(-n,n+1):
         z = charges + i
-        mz = (mw + z*0.01 ) / z
-        l.append(mz)
+        mz = (mw + z*0.007 ) / z
+        mz_l.append(mz)
+        z_l.append(z)
         dpg.add_plot_annotation(label=f"{z}+", default_value=(mz, 0), offset=(-15, -15), color=colors_list[k], clamped=False, parent="peak_matching_plot", tag=f"peak_annotation_{k}_{mz}")
-
+        
     if dpg.does_item_exist(f"mz_lines_{k}"):
         dpg.delete_item(f"mz_lines_{k}")
-    dpg.add_inf_line_series(l, parent="y_axis_plot3", tag=f"mz_lines_{k}")
+    dpg.add_inf_line_series(mz_l, parent="y_axis_plot3", tag=f"mz_lines_{k}")
     dpg.bind_item_theme(f"mz_lines_{k}", f"mz_line_theme_{k}")
+
+    update_theorical_peak_table(k, mz_l, z_l)
+
+
+def update_theorical_peak_table(k:int, mz_list:List[float], z_list): 
+    dpg.delete_item(f"theorical_peak_table_{k}", children_only=True)
+    dpg.delete_item(f"theorical_peak_table_{k}_2", children_only=True)
+
+    i = 0
+    with dpg.table_row(parent = f"theorical_peak_table_{k}"):
+        for z in mz_list:
+            if i <= 5:
+                    dpg.add_table_column(label=f"{z_list[i]}+", parent = f"theorical_peak_table_{k}")
+                    dpg.add_text(f"{mz_list[i]:.2f}")
+            else:
+                break
+            i += 1
+
+    if i < len(mz_list):
+        with dpg.table_row(parent = f"theorical_peak_table_{k}_2"): 
+            for r in range(i, len(mz_list)):               
+                dpg.add_table_column(label=f"{z_list[i]}+", parent = f"theorical_peak_table_{k}_2")
+                dpg.add_text(f"{mz_list[i]:.2f}")
+                i += 1
+
+def draw_fitted_peaks_matching(sender = None, app_data = None, user_data:MSData = None):
+    spectrum = user_data
+    # Delete previous peaks
+    for alias in dpg.get_aliases():
+        if alias.startswith("fitted_peak_matching") or alias.startswith("peak_annotation_matching_"):
+            dpg.delete_item(alias)
+    
+    threshold = dpg.get_value("peak_matching_threshold")
+    start_l = []
+    for peak in spectrum.peaks:
+        A= spectrum.peaks[peak].A
+        apex = spectrum.peaks[peak].x0_refined
+        start = apex -  spectrum.peaks[peak].sigma_L
+        
+        while  bi_gaussian(start, spectrum.peaks[peak].A, apex, spectrum.peaks[peak].sigma_L, spectrum.peaks[peak].sigma_R) > 0.1 * A:       
+            start -= 0.01
+        start10pcs = start
+        while  bi_gaussian(start, spectrum.peaks[peak].A, apex, spectrum.peaks[peak].sigma_L, spectrum.peaks[peak].sigma_R) > 0.01 * A:       
+            start -= 0.01
+        start1pcs = start
+        mid = (start10pcs + start1pcs) / 2
+        thick = start10pcs - start1pcs
+        dpg.draw_line((mid, 0), (mid, max(spectrum.working_data[:,1])), parent="peak_matching_plot", color=(246, 32, 24,128), thickness=thick, tag=f"fitted_peak_matching_{peak}")
+        print(f"Peak {peak}: start1pcs = {start1pcs:.2f}, start10pcs = {start10pcs:.2f}, thick = {thick:.2f}")
+        start_l.append(start)
+    
+   # dpg.add_inf_line_series(start_l, parent="y_axis_plot3", tag="fitted_peak_matching")
+   #dpg.bind_item_theme("fitted_peak_matching", "matching_lines")
+
+       
+
 
     
