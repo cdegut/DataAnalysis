@@ -1,3 +1,4 @@
+from sre_constants import SUCCESS
 from pybaselines import Baseline
 from scipy.signal import find_peaks, savgol_filter
 import pandas as pd
@@ -68,6 +69,7 @@ class peak_params:
     sigma_L: float
     sigma_R: float
     width: np.ndarray
+    fitted: bool
 
 if __name__ == "__main__":
     ms = MSData()

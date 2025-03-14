@@ -1,6 +1,4 @@
 from typing import List
-from cv2 import threshold
-from networkx import sigma
 import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks, savgol_filter
@@ -99,7 +97,7 @@ def peaks_finder(sender = None, app_data = None, user_data:MSData = None):
         sample = spectrum.working_data[:,0][peak - 250:peak + 250]
         sampling_rate = np.mean(np.diff(sample))
         width = peaks_data["widths"][i] * sampling_rate
-        new_peak = peak_params(A=spectrum.working_data[:,1][peak], x0_init=spectrum.working_data[:,0][peak], x0_refined=0, sigma_L=0, sigma_R=0, width=width)
+        new_peak = peak_params(A=spectrum.working_data[:,1][peak], x0_init=spectrum.working_data[:,0][peak], x0_refined=0, sigma_L=0, sigma_R=0, width=width, fitted=False)
         spectrum.peaks[new_peak_index] = new_peak
         new_peak_index += 1
         i += 1
@@ -129,7 +127,7 @@ def initial_peaks_parameters(spectrum):
             i += 1
             continue
 
-        A_guess = spectrum.working_data[:,0][peak]
+        A_guess = spectrum.peaks[peak].A
         sigma_L_guess = sigma_R_guess = spectrum.peaks[peak].width /2
         print(f"Peak {i}: A = {A_guess:.3f}, x0 = {x0_guess:.3f}, sigma_L = {sigma_L_guess:.3f}, sigma_R = {sigma_R_guess:.3f}")
         initial_params.extend([A_guess, x0_guess, sigma_L_guess, sigma_R_guess])
@@ -213,9 +211,11 @@ def rolling_window_fit(sender = None, app_data = None, user_data:MSData = None):
     spectrum = user_data
     initial_params, working_peak_list = initial_peaks_parameters(spectrum)
     
-    window = dpg.get_value("rolling_window")
+    #window = dpg.get_value("rolling_window")
+    mbg_param = []
     i = 0
     for peak in working_peak_list:
+        window = spectrum.peaks[peak].width
         A_guess, x0_guess, sigma_L_guess, sigma_R_guess =  initial_params[i*4:(i+1)*4]
         initial_param = [A_guess, x0_guess, sigma_L_guess, sigma_R_guess]
         data_x = spectrum.working_data[:,0]
@@ -223,13 +223,34 @@ def rolling_window_fit(sender = None, app_data = None, user_data:MSData = None):
         mask = (data_x >= x0_guess - window) & (data_x <= x0_guess + window)
         data_x = data_x[mask]
         data_y = data_y[mask]
-        popt, _ = opt.curve_fit(bi_gaussian, data_x, data_y, p0=initial_param)
+        try:
+            popt, _ = opt.curve_fit(bi_gaussian, data_x, data_y, p0=initial_param)
+            print(f"fitting done for peak {peak}")
+
+        except:
+            print(f"Error - curve_fit failed for peak {peak}")
+            spectrum.peaks[peak].fitted = False
+            i += 1
+            continue
         spectrum.peaks[peak].A = popt[0]
         spectrum.peaks[peak].x0_refined = popt[1]
         spectrum.peaks[peak].sigma_L = popt[2]
         spectrum.peaks[peak].sigma_R = popt[3]
+        spectrum.peaks[peak].fitted = True
+        mbg_param.extend([popt[0], popt[1], popt[2], popt[3]])
+    
         i += 1
-
+    
+    for peak in spectrum.peaks:
+        if not spectrum.peaks[peak].fitted:
+            continue
+        offset = multi_bi_gaussian(spectrum.peaks[peak].x0_refined, *mbg_param) - spectrum.peaks[peak].A
+        print(f"Peak {peak}: A = {spectrum.peaks[peak].A:.3f}, x0 = {spectrum.peaks[peak].x0_refined:.3f}, offset = {offset:.3f}, new A = {spectrum.peaks[peak].A - offset:.3f}")
+        spectrum.peaks[peak].A -= offset
+        
+    
+    
+        
     draw_fitted_peaks(None, None, spectrum)
 
 def update_peak_params(peak_list, popt, spectrum:MSData):
@@ -237,13 +258,14 @@ def update_peak_params(peak_list, popt, spectrum:MSData):
     for peak in peak_list:   
         A_fit, x0_fit, sigma_L_fit, sigma_R_fit = popt[i*4:(i+1)*4]     
         if peak < 0:           
-            spectrum.peaks[peak] = peak_params(A=A_fit, x0_init=x0_fit, x0_refined=x0_fit, sigma_L=sigma_L_fit, sigma_R=sigma_R_fit, width=sigma_L_fit + sigma_R_fit)
+            spectrum.peaks[peak] = peak_params(A=A_fit, x0_init=x0_fit, x0_refined=x0_fit, sigma_L=sigma_L_fit, sigma_R=sigma_R_fit, width=sigma_L_fit + sigma_R_fit, fitted=True)
             i += 1
             continue
         spectrum.peaks[peak].A = A_fit
         spectrum.peaks[peak].x0_refined = x0_fit
         spectrum.peaks[peak].sigma_L = sigma_L_fit
         spectrum.peaks[peak].sigma_R = sigma_R_fit
+        spectrum.peaks[peak].fitted = True
         i += 1
 
 def draw_fitted_peaks(sender = None, app_data = None, user_data:MSData = None):
@@ -263,8 +285,11 @@ def draw_fitted_peaks(sender = None, app_data = None, user_data:MSData = None):
         x0_fit = spectrum.peaks[peak].x0_refined
         if x0_fit < spectrum.working_data[:,0][0] or x0_fit > spectrum.working_data[:,0][-1]:
             continue
+        if not spectrum.peaks[peak].fitted:
+            continue
 
         A = spectrum.peaks[peak].A
+        print(A)
         sigma_L_fit = spectrum.peaks[peak].sigma_L
         sigma_R_fit = spectrum.peaks[peak].sigma_R
              
@@ -292,6 +317,8 @@ def update_peak_table(spectrum:MSData):
         dpg.delete_item(tag)
 
     for peak in spectrum.peaks:
+        if not spectrum.peaks[peak].fitted:
+            continue
         apex = spectrum.peaks[peak].x0_refined
         start = apex - 3 * spectrum.peaks[peak].sigma_L
         end = apex + 3 * spectrum.peaks[peak].sigma_R

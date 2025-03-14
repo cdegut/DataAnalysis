@@ -1,4 +1,3 @@
-from gettext import find
 import dearpygui.dearpygui as dpg
 from modules.msdata_class import MSData, peak_params
 from modules.funct import *
@@ -6,10 +5,10 @@ from modules.var import colors_list
 
 
 spectrum = MSData()
-#spectrum.import_csv(rf"D:\MassSpec\Um_2-1_1x.csv")
+spectrum.import_csv(rf"D:\MassSpec\Um_2-1_1x.csv")
 #spectrum.import_csv(rf"D:\MassSpec\Um_data.csv")
 #spectrum.import_csv(rf"D:\MassSpec\CS_RBC_alone.csv")
-spectrum.import_csv(rf"D:\MassSpec\CR_aloneCID.csv")
+#spectrum.import_csv(rf"D:\MassSpec\CR_aloneCID.csv")
 
 # Create a Dear PyGui context
 dpg.create_context()
@@ -114,9 +113,10 @@ dpg.bind_item_theme("corrected_series_plot3", data_theme)
 ### Auto start
 dpg.set_value("L_data_clipping", 9500)
 dpg.set_value("R_data_clipping", 11700)
-dpg.set_value("peak_detection_threshold", 200)
-dpg.set_value("peak_detection_width", 35)
-dpg.set_value("peak_detection_distance", 70)
+dpg.set_value("peak_detection_threshold", 52)
+dpg.set_value("peak_detection_width", 220)
+dpg.set_value("peak_detection_distance", 560)
+dpg.set_value("baseline_window", 350)
 data_clipper(None, None, spectrum)
 toggle_baseline(None,None, spectrum)
 import time
