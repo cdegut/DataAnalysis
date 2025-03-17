@@ -1,12 +1,13 @@
-from torch import res
 from modules.data_structures import MSData, peak_params
+from typing import Tuple
 import dearpygui.dearpygui as dpg
 from modules.helpers import multi_bi_gaussian, bi_gaussian
 import numpy as np
 import scipy.optimize as opt
 from scipy.signal import find_peaks
 from modules.dpg_draw import log, draw_fitted_peaks, draw_found_peaks
-from scipy.signal import savgol_filter
+import random
+
 
 
 def peaks_finder_callback(sender, app_data, user_data:MSData):
@@ -131,62 +132,88 @@ def rolling_window_fit(sender = None, app_data = None, user_data:MSData = None):
     draw_fitted_peaks(None, None, spectrum)
 
 def refine_peak_parameters(working_peak_list, mbg_params, spectrum:MSData):
-    #residual = spectrum.baseline_corrected[:,1] - multi_bi_gaussian(spectrum.baseline_corrected[:,0], *mbg_params)
-    #dpg.set_value("residual", [spectrum.baseline_corrected[:,0].tolist(), residual.tolist()])
     
-    for k in range(50):
-        
-        i =0
-        for peak in working_peak_list:
+    original_peaks: Tuple[int, peak_params] = {peak:spectrum.peaks[peak] for peak in working_peak_list}
+    data_x = spectrum.working_data[:,0]
+    data_y = spectrum.baseline_corrected[:,1]
+
+    rmse_list = []
+
+    iterations_list = [i for i in range(len(working_peak_list))]
+    for k in range(1000):        
+        #i =0
+        residual = spectrum.baseline_corrected[:,1] - multi_bi_gaussian(spectrum.baseline_corrected[:,0], *mbg_params)
+        rmse = np.sqrt(np.mean(residual**2))
+        rmse_list.append(rmse)
+        if k > 10:
+            std = np.std(rmse_list[-10:])
+            if std < 0.1:
+                print("Residual is stable. Exiting")
+                break
+
+            print(f"Iteration {k}; RMSE: {rmse:.3f}, Residual std: {std:.3f}")
+
+        random.shuffle(iterations_list) #do not use the same order every iteration
+
+        for i in iterations_list:
+            peak = working_peak_list[i]
             x0_fit = spectrum.peaks[peak].x0_refined
             sigma_L_fit = spectrum.peaks[peak].sigma_L
             sigma_R_fit = spectrum.peaks[peak].sigma_R
 
-            # Correct amplitude
-            data_x = spectrum.working_data[:,0]
-            data_y = spectrum.baseline_corrected[:,1]
-            mask = (data_x >= x0_fit - sigma_R_fit) & (data_x <= x0_fit + sigma_L_fit)
+            mask = (data_x >= x0_fit - sigma_R_fit%4) & (data_x <= x0_fit + sigma_L_fit%4)
             data_x_peak = data_x[mask]
             data_y_peak = data_y[mask]
-            #y_filtered = savgol_filter(data_y_peak, window_length=int (sigma_L_fit + sigma_R_fit), polyorder=3)
-            peak_residual = np.average(data_y_peak)  - np.average(multi_bi_gaussian(data_x_peak, *mbg_params))
-            spectrum.peaks[peak].A_refined = spectrum.peaks[peak].A_refined + (peak_residual/10)
+
+            peak_error = np.mean(data_y_peak  - multi_bi_gaussian(data_x_peak, *mbg_params))
+
+            spectrum.peaks[peak].A_refined = spectrum.peaks[peak].A_refined + (peak_error/10)
             mbg_params[i*4] = spectrum.peaks[peak].A_refined
 
-            sharpen = False
-            if sharpen == True:
-                # Sharpen the peak
-                L_mask = (data_x >= x0_fit - sigma_L_fit) & (data_x <= x0_fit)
-                R_mask = (data_x >= x0_fit) & (data_x <= x0_fit + sigma_R_fit)
+            # Sharpen the peak           
+            L_mask = (data_x >= x0_fit - sigma_L_fit) & (data_x <= x0_fit - sigma_L_fit//4)
+            R_mask = (data_x >= x0_fit + sigma_R_fit//4) & (data_x <= x0_fit + sigma_R_fit)
 
-                data_x_L = data_x[L_mask]
-                data_y_L = data_y[L_mask]
-                data_x_R = data_x[R_mask]
-                data_y_R = data_y[R_mask]
-                residual_L = data_y_L - multi_bi_gaussian(data_x_L , *mbg_params)
-                residual_R = data_y_R - multi_bi_gaussian(data_x_R, *mbg_params)
-                print(f"Peak {peak}: L = {np.average(residual_L):.3f}, R = {np.average(residual_R):.3f}")
-                if np.average(residual_L) > 0:
-                    sigma_L_fit = sigma_L_fit * 1.05
-                else:
-                    pass
-                    sigma_L_fit = sigma_L_fit * 0.95    
-                
-                if np.average(residual_R) > 0:
-                    sigma_R_fit = sigma_R_fit * 1.05
-                else:
-                    pass
-                    sigma_R_fit = sigma_R_fit * 0.95
+            data_x_L = data_x[L_mask]
+            data_y_L = data_y[L_mask]
+            data_x_R = data_x[R_mask]
+            data_y_R = data_y[R_mask]
+            mbg_L =  multi_bi_gaussian(data_x_L , *mbg_params)
+            mbg_R = multi_bi_gaussian(data_x_R, *mbg_params)
 
-                mbg_params[i*4 + 2] = sigma_L_fit
-                mbg_params[i*4 + 3] = sigma_R_fit
-                spectrum.peaks[peak].sigma_L = sigma_L_fit
-                spectrum.peaks[peak].sigma_R = sigma_R_fit   
+            error_l = np.mean((data_y_L - mbg_L))
+            error_r = np.mean((data_y_R - mbg_R))
 
-            i += 1
+            if error_l > 0 and error_r < 0:
+                x0_fit = x0_fit - 0.02
+
+            elif error_l <0 and error_r > 0:
+                x0_fit = x0_fit + 0.02
+            else:
+                sigma_L_fit = sigma_L_fit + error_l/1000
+                sigma_R_fit = sigma_R_fit + error_r/1000
+            
+            original_peak = original_peaks[peak]
+
+            if sigma_L_fit > original_peak.width*2:
+                sigma_L_fit = sigma_L_fit/2
+            if sigma_R_fit > original_peak.width*2:
+                sigma_R_fit = sigma_R_fit/2
+            if sigma_L_fit < 1:
+                sigma_L_fit = 1
+            if sigma_R_fit < 1:
+                sigma_R_fit = 1
             
 
+            spectrum.peaks[peak].sigma_L = sigma_L_fit
+            spectrum.peaks[peak].sigma_R = sigma_R_fit
+            spectrum.peaks[peak].x0_refined = x0_fit
 
+            mbg_params[i*4 + 2] = sigma_L_fit
+            mbg_params[i*4 + 3] = sigma_R_fit
+            mbg_params[i*4 + 1] = x0_fit
+
+            
 def update_peak_params(peak_list, popt, spectrum:MSData):
     i = 0
     for peak in peak_list:   
@@ -197,62 +224,3 @@ def update_peak_params(peak_list, popt, spectrum:MSData):
         spectrum.peaks[peak].sigma_R = sigma_R_fit
         spectrum.peaks[peak].fitted = True
         i += 1
-
-
-'''
-def multi_bigaussian_fit(sender = None, app_data = None, user_data:MSData = None):
-    spectrum = user_data
-
-    initial_params, working_peak_list = initial_peaks_parameters(spectrum)
-
-    def try_to_fit(data_x:pd.Series, data_y:pd.Series, initial_params, downsample:int = 1):
-        try:
-            popt, _ = opt.curve_fit(multi_bi_gaussian, data_x[::downsample], data_y[::downsample], p0=initial_params)
-            print(f"fitting done with downsampling of {downsample}")
-            return popt
-        
-        except RuntimeError:
-            print(f"Error - curve_fit failed with downsampling of {downsample}")
-            return None
-
-    print("Peak list:", working_peak_list)
-
-    window = dpg.get_value( "smoothing_window")
-    filtered_corrected = savgol_filter(spectrum.baseline_corrected_clipped[:,1], window, 2)
-    
-    # Initial fitting with downsampled and filtered data
-    if len(spectrum.working_data[:,0]) > 25000:
-        downsample = int(len(spectrum.working_data[:,0]) /2500)
-        popt = try_to_fit(spectrum.working_data[:,0], filtered_corrected, initial_params, downsample)
-
-        if popt is None:
-            print("Error - Initial curve_fit failed")
-            return
-        else:
-            update_peak_params(working_peak_list, popt, spectrum)
-            draw_fitted_peaks(None, None, spectrum)
-    
-    else:
-        popt = initial_params
-    
-    # Second fitting with lower downsample
-    if len(spectrum.working_data[:,0]) > 10000:
-        downsample = 10
-        popt = try_to_fit(spectrum.working_data[:,0], filtered_corrected, popt, downsample)
-        
-        if popt is None:
-            return
-        else:
-            update_peak_params(working_peak_list, popt, spectrum)
-            draw_fitted_peaks(None, None, spectrum)
-    
-    # Final fitting with full resolution data
-    popt = try_to_fit(spectrum.baseline_corrected_clipped[:,0], spectrum.baseline_corrected_clipped[:,1], popt)
-    
-    if popt is None:
-        return
-    
-    update_peak_params(working_peak_list, popt, spectrum)
-    draw_fitted_peaks(None, None, spectrum)
-    print("Final fitting with full resolution data done")'
-'''

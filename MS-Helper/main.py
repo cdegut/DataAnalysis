@@ -39,7 +39,7 @@ with dpg.window(label="Data Filtering and peak finding",width=1430, pos=(0,60), 
         dpg.add_line_series(spectrum.baseline[:,0].tolist(), spectrum.baseline[:,1].tolist(), label="Snip Baseline", parent=y_axis, tag="baseline")  
         
     dpg.add_text("Data Filtering:")
-    dpg.add_slider_int(label="Smoothing Window", default_value=500, min_value=3, max_value=1000, callback=filter_data, user_data=spectrum, tag="smoothing_window")
+    dpg.add_slider_int(label="Smoothing Window", default_value=925, min_value=3, max_value=1000, callback=filter_data, user_data=spectrum, tag="smoothing_window")
     dpg.add_text("Baseline estimation:")
     with dpg.group(horizontal=True, horizontal_spacing= 50):
         dpg.add_button(label="Toggle Baseline", callback=toggle_baseline, user_data=spectrum)
