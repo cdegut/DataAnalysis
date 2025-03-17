@@ -1,10 +1,10 @@
-from sre_constants import SUCCESS
 from pybaselines import Baseline
-from scipy.signal import find_peaks, savgol_filter
+from scipy.signal import savgol_filter
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass
-from typing import Dict
+
+from typing import Dict, Tuple
 from time import time 
 
 # Define a class to store mass spectrometry data
@@ -14,62 +14,61 @@ class MSData():
         self.working_data = None
         self.baseline = None
         self.baseline_corrected = None
-        self.filtered = None
         self.peaks: Dict[int : peak_params] = {}
         self.baseline_toggle = False
-        self.baseline_corrected_clipped = None
-        self.last_baseline_corrected = time()
-    
+        self.baseline_need_update = False
+        
+           
     def import_csv(self, path:str):
         data = pd.read_csv(path)
         data = data.dropna()
         self.original_data = data.to_numpy()
         self.working_data = self.original_data
         self.correct_baseline(0)
-        
-        print("Data imported successfully")
-        self.filter_data(window_length=50)
+        return True
     
     def clip_data(self, L_clip:int, R_clip:int):
         self.working_data = self.original_data[(self.original_data[:,0] > L_clip) & (self.original_data[:,0] < R_clip)]
-        self.baseline_corrected_clipped = self.baseline_corrected[(self.baseline_corrected[:,0] > L_clip) & (self.baseline_corrected[:,0] < R_clip)]
-        
 
-    def filter_data(self, window_length, polyorder=2):
+    def get_filterd_data(self, window_length, polyorder=2):
         if window_length % 2 == 0:
             window_length += 1  # Ensure window_length is odd
-
-        self.filtered = np.column_stack((self.working_data[:, 0], savgol_filter(self.working_data[:, 1], window_length=window_length, polyorder=polyorder)))
+        filtered =  savgol_filter(self.working_data[:, 1], window_length=window_length, polyorder=polyorder)
+        return filtered.tolist()
 
     def correct_baseline(self, window):
         if not self.baseline_toggle:
             self.baseline_corrected = self.working_data
-            self.baseline_corrected_clipped = self.working_data
             self.baseline = np.column_stack((self.working_data[:,0], [0]*len(self.working_data)))
-            self.last_baseline_corrected = time()
+            self.baseline_need_update = False
             return
           
         baseline_fitter = Baseline(x_data=self.working_data[:,0])
         bkg_4, params_4 = baseline_fitter.snip(self.working_data[:,1], max_half_window=window, decreasing=True, smooth_half_window=3)    
         self.baseline = np.column_stack((self.working_data[:,0], bkg_4 ))
         self.baseline_corrected = np.column_stack((self.working_data[:,0], self.working_data[:,1] - bkg_4))
-        self.baseline_corrected_clipped = self.baseline_corrected
-        self.last_baseline_corrected = time()
+        self.baseline_need_update = False        
     
     def guess_sampling_rate(self):
         sampling_rate = np.mean(np.diff(self.working_data[:,0]))
         return sampling_rate
+    
+    def request_baseline_update(self) -> None:
+        self.baseline_need_update = True
         
 
 @dataclass
 class peak_params:
-    A: float
+    A_init: float
     x0_init: float
-    x0_refined: float
-    sigma_L: float
-    sigma_R: float
     width: np.ndarray
-    fitted: bool
+    A_refined: float = 0
+    x0_refined: float = 0
+    sigma_L: float = 0
+    sigma_R: float =0
+    fitted: bool = False
+    integral: float = 0
+    start_range: Tuple[int, int] = (0, 0)
 
 if __name__ == "__main__":
     ms = MSData()
@@ -78,7 +77,5 @@ if __name__ == "__main__":
     ms.baseline_toggle = True
     ms.correct_baseline(40)
     ms.guess_sampling_rate()
-    ms.filter_data(50)
-    print(ms.filtered[:,0])
     print(ms.working_data[:,0])
 

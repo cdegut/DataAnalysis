@@ -23,3 +23,8 @@ with dpg.theme(tag = f"matching_lines"):
     with dpg.theme_component(dpg.mvInfLineSeries):
         dpg.add_theme_style(dpg.mvPlotStyleVar_LineWeight, 6, category=dpg.mvThemeCat_Plots)
         dpg.add_theme_color(dpg.mvPlotCol_Line, (246, 56, 45, 64), category=dpg.mvThemeCat_Plots)
+
+with dpg.theme(tag = f"peak_finding_lines"):
+    with dpg.theme_component(dpg.mvInfLineSeries):
+        dpg.add_theme_style(dpg.mvPlotStyleVar_LineWeight, 1, category=dpg.mvThemeCat_Plots)
+        dpg.add_theme_color(dpg.mvPlotCol_Line, (222, 56, 45), category=dpg.mvThemeCat_Plots)

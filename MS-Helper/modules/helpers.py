@@ -1,4 +1,5 @@
 import numpy as np
+
 # Define multi-peak bi-Gaussian function
 def multi_bi_gaussian(x, *params):
     n_peaks = len(params) // 4
