@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Dict
 from modules.data_structures import MSData
 import time as time
 import dearpygui.dearpygui as dpg
@@ -9,6 +10,7 @@ class RenderCallback:
     spectrum:MSData
     last_baseline_corrected = time.time()
     baseline_correct_requested = False
+    mz_lines = {}
 
     def execute(self):
         now = time.time()

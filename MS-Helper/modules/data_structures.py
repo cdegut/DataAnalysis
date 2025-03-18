@@ -69,6 +69,8 @@ class peak_params:
     fitted: bool = False
     integral: float = 0
     start_range: Tuple[int, int] = (0, 0)
+    do_not_fit: bool = False
+    user_added: bool = False
 
 if __name__ == "__main__":
     ms = MSData()

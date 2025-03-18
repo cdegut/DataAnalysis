@@ -1,10 +1,15 @@
-from typing import List
+from typing import List, Tuple
+from anyio import key
+from matplotlib.pylab import f
+from networkx import sigma
 import numpy as np
-import pandas as pd
 from scipy.integrate import quad
+from sympy import is_zero_dimensional
+from modules import render_callback
 from modules.data_structures import MSData
 from modules.helpers import multi_bi_gaussian, bi_gaussian
 import dearpygui.dearpygui as dpg
+from modules.render_callback import RenderCallback
 from modules.var import colors_list
 
 log_string = ""
@@ -12,12 +17,6 @@ def log(message:str) -> None:
     global log_string
     log_string += message + "\n"
     dpg.set_value("message_box", log_string)
-
-def draw_found_peaks(peaks_centers):
-    if dpg.does_item_exist("peak_lines"):
-        dpg.delete_item("peak_lines")   
-    dpg.add_inf_line_series(peaks_centers, parent="y_axis_plot1", tag="peak_lines")
-    dpg.bind_item_theme("peak_lines", "peak_finding_lines")
 
 def data_clipper(sender = None, app_data = None, user_data:MSData = None):
     spectrum = user_data
@@ -112,86 +111,190 @@ def update_peak_table(spectrum:MSData):
             dpg.add_text(f"{integral:.2f}")
 
 
-def draw_mz_lines(sender = None, app_data = None, user_data:int = 0):
-    k = user_data
-    for alias in dpg.get_aliases():
-        if alias.startswith(f"peak_annotation_{k}"):
-            dpg.delete_item(alias)
+def draw_mz_lines(sender = None, app_data = None, user_data:Tuple[MSData,int] = None):
+    render_callback: RenderCallback = user_data[0]
+    k = user_data[1]
     
-
     mw:int = dpg.get_value(f"molecular_weight_{k}")
     charges:int = dpg.get_value(f"charges_{k}")
     nb_peak_show:int = dpg.get_value(f"nb_peak_show_{k}")
-    n = nb_peak_show // 2
 
     mz_l = []
     z_l = []
+    z_mz = []
 
-    for i in range(-n,n+1):
-        z = charges + i
+    for i in range(nb_peak_show):
+        z = charges - i
         mz = (mw + z*0.007 ) / z
         mz_l.append(mz)
         z_l.append(z)
-        dpg.add_plot_annotation(label=f"{z}+", default_value=(mz, 0), offset=(-15, -15), color=colors_list[k], clamped=False, parent="peak_matching_plot", tag=f"peak_annotation_{k}_{mz}")
-        
-    if dpg.does_item_exist(f"mz_lines_{k}"):
-        dpg.delete_item(f"mz_lines_{k}")
-    dpg.add_inf_line_series(mz_l, parent="y_axis_plot3", tag=f"mz_lines_{k}")
-    dpg.bind_item_theme(f"mz_lines_{k}", f"mz_line_theme_{k}")
+        z_mz.append((z, mz))
+
+
+    for alias in dpg.get_aliases():
+        if alias.startswith(f"mz_lines_{k}"):
+            dpg.delete_item(alias)
+
+    for line in mz_l:
+        center_slice = render_callback.spectrum.baseline_corrected[:,1][(render_callback.spectrum.baseline_corrected[:,0] > line - 0.5) & (render_callback.spectrum.baseline_corrected[:,0] < line + 0.5)]
+        max_y = max(center_slice) if len(center_slice) > 0 else 0
+        dpg.draw_line((line, -50), (line, max_y), parent="peak_matching_plot", tag=f"mz_lines_{k}_{line}", color=colors_list[k], thickness=1)
 
     update_theorical_peak_table(k, mz_l, z_l)
+    render_callback.mz_lines[k] = z_mz
+    redraw_blocks(render_callback)
 
 def update_theorical_peak_table(k:int, mz_list:List[float], z_list): 
     dpg.delete_item(f"theorical_peak_table_{k}", children_only=True)
-    dpg.delete_item(f"theorical_peak_table_{k}_2", children_only=True)
 
-    i = 0
-    with dpg.table_row(parent = f"theorical_peak_table_{k}"):
-        for z in mz_list:
-            if i <= 5:
-                    dpg.add_table_column(label=f"{z_list[i]}+", parent = f"theorical_peak_table_{k}")
-                    dpg.add_text(f"{mz_list[i]:.2f}")
-            else:
-                break
-            i += 1
+    dpg.add_table_column(parent = f"theorical_peak_table_{k}")
+    dpg.add_table_column(parent = f"theorical_peak_table_{k}")
+    dpg.add_table_column(parent = f"theorical_peak_table_{k}")
 
-    if i < len(mz_list):
-        with dpg.table_row(parent = f"theorical_peak_table_{k}_2"): 
-            for r in range(i, len(mz_list)):               
-                dpg.add_table_column(label=f"{z_list[i]}+", parent = f"theorical_peak_table_{k}_2")
-                dpg.add_text(f"{mz_list[i]:.2f}")
-                i += 1
 
-def draw_fitted_peaks_matching(sender = None, app_data = None, user_data:MSData = None):
-    spectrum = user_data
-    # Delete previous peaks
-    for alias in dpg.get_aliases():
-        if alias.startswith("fitted_peak_matching") or alias.startswith("peak_annotation_matching_"):
-            dpg.delete_item(alias)
-    
-
-    start_l = []
-    for peak in spectrum.peaks:
-        A= spectrum.peaks[peak].A
-        apex = spectrum.peaks[peak].x0_refined
-        start = apex -  spectrum.peaks[peak].sigma_L
+    row = len(mz_list)//3 + (len(mz_list)%3 >0)
+    for r in range(0, row ):
+        with dpg.table_row(parent = f"theorical_peak_table_{k}", tag = f"theorical_peak_table_{k}_{r}"):
+            dpg.bind_item_theme( f"theorical_peak_table_{k}_{r}", "table_row_bg_grey")
+            for n in range(0, 3):
+                try:
+                    dpg.add_text(f"{z_list[r*3+n]}+")
+                except IndexError:
+                    pass          
         
-        while  bi_gaussian(start, spectrum.peaks[peak].A, apex, spectrum.peaks[peak].sigma_L, spectrum.peaks[peak].sigma_R) > 0.1 * A:       
-            start -= 0.01
-        start10pcs = start
-        while  bi_gaussian(start, spectrum.peaks[peak].A, apex, spectrum.peaks[peak].sigma_L, spectrum.peaks[peak].sigma_R) > 0.01 * A:       
-            start -= 0.01
-        start1pcs = start
+        with dpg.table_row(parent = f"theorical_peak_table_{k}"):
+            for n in range(0, 3):
+                try:
+                    dpg.add_text(f"{mz_list[r*3+n]:.2f}")
+                except IndexError:
+                    pass
+     
+
+def update_peak_starting_points(sender = None, app_data= None, user_data:RenderCallback = None):
+    spectrum = user_data.spectrum 
+    low_limit = float(dpg.get_value("lower_bound")) /100
+    high_limit = float(dpg.get_value("upper_bound")) /100
+    print(low_limit, high_limit)
+
+    if dpg.get_value("show_centers"):
+        center_width = dpg.get_value("center_width") /100
+        for peak in spectrum.peaks:
+            if not spectrum.peaks[peak].fitted:
+                continue
+            apex = spectrum.peaks[peak].x0_refined
+            sigma_L = spectrum.peaks[peak].sigma_L
+            sigma_R = spectrum.peaks[peak].sigma_R
+            spectrum.peaks[peak].start_range = (apex - sigma_L* center_width, apex + sigma_R * center_width)    
+    else:
+
+        for peak in spectrum.peaks:
+            if not spectrum.peaks[peak].fitted:
+                continue
+
+            A= spectrum.peaks[peak].A_refined
+            apex = spectrum.peaks[peak].x0_refined
+            start = apex -  spectrum.peaks[peak].sigma_L
+            
+            while  bi_gaussian(start, spectrum.peaks[peak].A_refined, apex, spectrum.peaks[peak].sigma_L, spectrum.peaks[peak].sigma_R) > high_limit * A:       
+                start -= 0.01
+            start10pcs = start
+            while  bi_gaussian(start, spectrum.peaks[peak].A_refined, apex, spectrum.peaks[peak].sigma_L, spectrum.peaks[peak].sigma_R) > low_limit * A:       
+                start -= 0.01
+            start1pcs = start
+            spectrum.peaks[peak].start_range = (start1pcs, start10pcs)
+        
+    redraw_blocks(user_data)
+
+def redraw_blocks(render_callback:RenderCallback):
+    spectrum = render_callback.spectrum
+
+    # Delete previous peaks and anotation
+    for alias in dpg.get_aliases():
+        if alias.startswith("fitted_peak_matching") or alias.startswith("peak_annotation_matching"):
+            dpg.delete_item(alias)   
+    
+    for peak in spectrum.peaks:
+        if not spectrum.peaks[peak].fitted:
+            continue
+
+        start1pcs, start10pcs = spectrum.peaks[peak].start_range
         mid = (start10pcs + start1pcs) / 2
         thick = start10pcs - start1pcs
-        dpg.draw_line((mid, 0), (mid, max(spectrum.working_data[:,1])), parent="peak_matching_plot", color=(246, 32, 24,128), thickness=thick, tag=f"fitted_peak_matching_{peak}")
-        print(f"Peak {peak}: start1pcs = {start1pcs:.2f}, start10pcs = {start10pcs:.2f}, thick = {thick:.2f}")
-        start_l.append(start)
+
+
+        # non matched blocks
+        dpg.draw_line((mid, 25), (mid, -25), parent="peak_matching_plot", color=(246, 32, 24,128), thickness=thick, tag=f"fitted_peak_matching_{peak}")
+        dpg.add_plot_annotation(label=f"Peak {peak}", default_value=(mid, 0), offset=(15, 15), color=(100, 100, 100), clamped=False, parent="peak_matching_plot", tag=f"peak_annotation_matching_{peak}_gray")
+
+        for k in range(0, len(render_callback.mz_lines)):
+            mz_lines = render_callback.mz_lines[k]
+            color = colors_list[k]
+
+            # find matched blocks
+            for z_mz in mz_lines:
+                if z_mz[1] > start1pcs and z_mz[1] < start10pcs:
+                    dpg.delete_item(f"fitted_peak_matching_{peak}")
+                    dpg.draw_line((mid, 25), (mid, -25), parent="peak_matching_plot", color=color, thickness=thick, tag=f"fitted_peak_matching_{peak}")
+                    
+                    #dpg.delete_item(f"peak_annotation_matching_{k}_{z_mz[0]}")
+                    if not dpg.does_alias_exist(f"peak_annotation_matching_{k}_{z_mz[0]}"):
+                        x0_fit = spectrum.peaks[peak].x0_refined
+                        center_slice = render_callback.spectrum.baseline_corrected[:,1][(render_callback.spectrum.baseline_corrected[:,0] > x0_fit - 0.5) & (render_callback.spectrum.baseline_corrected[:,0] < x0_fit + 0.5)]
+                        median = np.median(center_slice)    if len(center_slice) > 0 else 0
+                        dpg.add_plot_annotation(label=f"{z_mz[0]}+", default_value=(x0_fit, median), offset=(15, -15), color=color, clamped=False, parent="peak_matching_plot", tag=f"peak_annotation_matching_{k}_{z_mz[0]}")
+
+    # Draw the line annotations of unmatched peaks      
+    for k in range(0, len(render_callback.mz_lines)):
+        mz_lines = render_callback.mz_lines[k]
+        color = colors_list[k]
+        for z_mz in mz_lines:
+            if not dpg.does_alias_exist(f"peak_annotation_matching_{k}_{z_mz[0]}"):           
+                dpg.add_plot_annotation(label=f"{z_mz[0]}+", default_value=(z_mz[1], 0), offset=(-15, -15-k*15), color=colors_list[k], clamped=False, parent="peak_matching_plot", tag=f"peak_annotation_matching_{k}_{z_mz[1]}")
     
-   # dpg.add_inf_line_series(start_l, parent="y_axis_plot3", tag="fitted_peak_matching")
-   #dpg.bind_item_theme("fitted_peak_matching", "matching_lines")
+    matching_quality(render_callback)
+    mass_difference(render_callback)
 
-       
+def matching_quality(render_callback:RenderCallback):
+    spectrum = render_callback.spectrum
+
+    for k in range(0, len(render_callback.mz_lines)):
+        mz_lines = render_callback.mz_lines[k]
+        squares = []
+        
+        for z_mz in mz_lines:
+            for peak in spectrum.peaks:
+                if not spectrum.peaks[peak].fitted:
+                    continue
+
+                start1pcs, start10pcs = spectrum.peaks[peak].start_range
+                if z_mz[1] > start1pcs and z_mz[1] < start10pcs:
+                    center = (start1pcs + start10pcs) / 2
+                    square_distance = (z_mz[1] - center)**2
+                    squares.append(square_distance)
+        
+        if len(squares) > 1:
+            rmsd = np.sqrt(np.mean(squares))
+            score = int((1 / rmsd) * 100) + (len(squares) * 20)
+            dpg.set_value(f"rmsd_{k}", f"{len(squares)} - RMSD: {rmsd:.2f} Score: {score}")
+        
+        elif len(squares) == 1:
+            dpg.set_value(f"rmsd_{k}", f"Only 1 peak match")
+        else:
+            dpg.set_value(f"rmsd_{k}", f"No matching peaks")
+
+def mass_difference(render_callback:RenderCallback):
+
+    mw_set1 =dpg.get_value("molecular_weight_0")
+    for i in range(1, 5):
+        mw = dpg.get_value(f"molecular_weight_{i}")
+        diff = mw - mw_set1
+        dpg.set_value(f"MW_diff_{i}", f"d{diff}")
 
 
     
+            
+        
+                    
+                
+
+        

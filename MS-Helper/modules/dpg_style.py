@@ -11,20 +11,19 @@ with dpg.theme() as data_theme:
     with dpg.theme_component(dpg.mvAll):
         dpg.add_theme_style(dpg.mvPlotStyleVar_LineWeight, 1, category=dpg.mvThemeCat_Plots)
         dpg.add_theme_color(dpg.mvPlotCol_Line, (100, 100, 100), category=dpg.mvThemeCat_Plots)
-i = 0
-for color in colors_list:
-    with dpg.theme(tag = f"mz_line_theme_{i}"):
-        with dpg.theme_component(dpg.mvInfLineSeries):
-            dpg.add_theme_style(dpg.mvPlotStyleVar_LineWeight, 1, category=dpg.mvThemeCat_Plots)
-            dpg.add_theme_color(dpg.mvPlotCol_Line, color, category=dpg.mvThemeCat_Plots)
-    i += 1
 
-with dpg.theme(tag = f"matching_lines"):
-    with dpg.theme_component(dpg.mvInfLineSeries):
-        dpg.add_theme_style(dpg.mvPlotStyleVar_LineWeight, 6, category=dpg.mvThemeCat_Plots)
-        dpg.add_theme_color(dpg.mvPlotCol_Line, (246, 56, 45, 64), category=dpg.mvThemeCat_Plots)
-
-with dpg.theme(tag = f"peak_finding_lines"):
-    with dpg.theme_component(dpg.mvInfLineSeries):
+with dpg.theme(tag = "filtered_data_theme"):
+    with dpg.theme_component(dpg.mvAll):
         dpg.add_theme_style(dpg.mvPlotStyleVar_LineWeight, 1, category=dpg.mvThemeCat_Plots)
-        dpg.add_theme_color(dpg.mvPlotCol_Line, (222, 56, 45), category=dpg.mvThemeCat_Plots)
+        dpg.add_theme_color(dpg.mvPlotCol_Line, (250,120,14), category=dpg.mvThemeCat_Plots)
+
+with dpg.theme(tag = "baseline_theme"):
+    with dpg.theme_component(dpg.mvAll):
+        dpg.add_theme_style(dpg.mvPlotStyleVar_LineWeight, 1, category=dpg.mvThemeCat_Plots)
+        dpg.add_theme_color(dpg.mvPlotCol_Line, (195, 242, 197), category=dpg.mvThemeCat_Plots)
+
+with dpg.theme(tag = "table_row_bg_grey"):
+    with dpg.theme_component(dpg.mvAll):
+        dpg.add_theme_color(
+            dpg.mvThemeCol_TableRowBg, (100, 100, 100),
+            category=dpg.mvThemeCat_Core)
