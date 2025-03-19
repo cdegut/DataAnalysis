@@ -1,15 +1,19 @@
+from networkx import draw
+from scipy.__config__ import show
 from modules.data_structures import MSData, peak_params
 from typing import Tuple
 import dearpygui.dearpygui as dpg
 from modules.helpers import multi_bi_gaussian
 import numpy as np
 from modules.dpg_draw import draw_fitted_peaks
+from modules.dpg_draw import log
 import random
 
 def run_fitting(sender = None, app_data = None, user_data:MSData = None):
     spectrum = user_data
     dpg.show_item("Fitting_indicator")
-    rolling_window_fit(spectrum)
+    k = dpg.get_value("fitting_iterations")
+    rolling_window_fit(spectrum, k)
     dpg.hide_item("Fitting_indicator")
 
 def initial_peaks_parameters(spectrum:MSData):
@@ -18,7 +22,7 @@ def initial_peaks_parameters(spectrum:MSData):
     i = 0
 
     if spectrum.peaks is None:
-        print("No peaks are detected. Please run peak detection first")
+        log("No peaks are detected. Please run peak detection first")
         return
     
     for peak in spectrum.peaks:
@@ -26,86 +30,70 @@ def initial_peaks_parameters(spectrum:MSData):
         x0_guess = spectrum.peaks[peak].x0_init
 
         if spectrum.peaks[peak].do_not_fit:
+            spectrum.peaks[peak].fitted = False
             continue
 
         if x0_guess < spectrum.working_data[:,0][0] or x0_guess > spectrum.working_data[:,0][-1]:
-            print(f"Peak {i} is out of bounds. Skipping")
+            log(f"Peak {i} is out of bounds. Skipping")
             i += 1
             continue
 
         A_guess = spectrum.peaks[peak].A_init
         sigma_L_guess = sigma_R_guess = spectrum.peaks[peak].width /2
-        initial_params.extend([A_guess, x0_guess, sigma_L_guess, sigma_R_guess])
-        
+        initial_params.extend([A_guess, x0_guess, sigma_L_guess, sigma_R_guess])       
         working_peak_list.append(peak)
         i += 1
     
     if working_peak_list == []:
-        print("No peaks are within the data range. Please adjust the peak detection parameters")
+        log("No peaks are within the data range. Please adjust the peak detection parameters")
         return
 
     return initial_params, working_peak_list
 
-def rolling_window_fit(spectrum:MSData):
+def rolling_window_fit(spectrum:MSData, iterations = 1000):
     baseline_window = dpg.get_value("baseline_window")
     spectrum.correct_baseline(baseline_window)
     initial_params, working_peak_list = initial_peaks_parameters(spectrum)
+    draw_fitted_peaks(None, None, None, delete=True)
   
-    mbg_param = []
-    fitted_peak_list = []
     i = 0
-    
     for peak in working_peak_list:
-        window = spectrum.peaks[peak].width
         A_guess, x0_guess, sigma_L_guess, sigma_R_guess =  initial_params[i*4:(i+1)*4]
-        initial_param = [A_guess, x0_guess, sigma_L_guess, sigma_R_guess]
-        print(f"Peak {peak}: A = {A_guess:.3f}, x0 = {x0_guess:.3f}, sigma_L = {sigma_L_guess:.3f}, sigma_R = {sigma_R_guess:.3f}")
-        
-        '''
-        data_x = spectrum.working_data[:,0]
-        data_y = spectrum.baseline_corrected[:,1]
-        mask = (data_x >= x0_guess - window) & (data_x <= x0_guess + window)
-        data_x = data_x[mask]
-        data_y = data_y[mask] 
-        
-        try:
-            popt, _ = opt.curve_fit(bi_gaussian, data_x, data_y, p0=initial_param)
-            print(f"fitting done for peak {peak}")
-            fitted_peak_list.append(peak)
-        except:
-            print(f"Error - curve_fit failed for peak {peak}")
-            spectrum.peaks[peak].fitted = False
-            i += 1
-            continue'
-        '''
-        
-        popt = initial_param
+        log(f"Peak {peak}: A = {A_guess:.3f}, x0 = {x0_guess:.3f}, sigma_L = {sigma_L_guess:.3f}, sigma_R = {sigma_R_guess:.3f}")
 
-        spectrum.peaks[peak].A_refined = popt[0]
-        spectrum.peaks[peak].x0_refined = popt[1]
-        spectrum.peaks[peak].sigma_L = popt[2]
-        spectrum.peaks[peak].sigma_R = popt[3]
-        spectrum.peaks[peak].fitted = True
-        mbg_param.extend([popt[0], popt[1], popt[2], popt[3]])
+        spectrum.peaks[peak].A_refined = A_guess
+        spectrum.peaks[peak].x0_refined = x0_guess
+        spectrum.peaks[peak].sigma_L = sigma_L_guess
+        spectrum.peaks[peak].sigma_R = sigma_R_guess
+        spectrum.peaks[peak].fitted = False
         i += 1
-    fitted_peak_list = working_peak_list
-
-    fit = refine_peak_parameters(fitted_peak_list, mbg_param, spectrum)   
+ 
+    fit = refine_peak_parameters(working_peak_list, initial_params, spectrum, iterations)   
     if fit:
-        print("Fitting done with no error")
+        log("Fitting done with no error")
+    else:
+        log("Error while fitting")
+        return
+    
     draw_fitted_peaks(None, None, spectrum)
 
-def refine_peak_parameters(working_peak_list, mbg_params, spectrum:MSData):
+
+def draw_residual(x_data, residual):
+    dpg.show_item("residual")
+    dpg.set_value("residual", [x_data, residual])
+
+def refine_peak_parameters(working_peak_list, mbg_params, spectrum:MSData, iterations=1000):
     
     original_peaks: Tuple[int, peak_params] = {peak:spectrum.peaks[peak] for peak in working_peak_list}
     data_x = spectrum.working_data[:,0]
     data_y = spectrum.baseline_corrected[:,1]
     rmse_list = []
-
     iterations_list = [i for i in range(len(working_peak_list))]
-    for k in range(1000):        
-        #i =0
+    
+    for k in range(iterations):  
         residual = spectrum.baseline_corrected[:,1] - multi_bi_gaussian(spectrum.baseline_corrected[:,0], *mbg_params)
+        draw_residual(spectrum.baseline_corrected[:,0].tolist(), residual.tolist())
+        
         rmse = np.sqrt(np.mean(residual**2))
         rmse_list.append(rmse)
         if k > 10:
@@ -130,11 +118,10 @@ def refine_peak_parameters(working_peak_list, mbg_params, spectrum:MSData):
             data_y_peak = data_y[mask]
             
             if len(data_x_peak) == 0 or len(data_y_peak) == 0:
-                print(f"masking error for peak {peak} block 1")              
+                log(f"masking error for peak {peak} block 1")              
                 continue
 
             peak_error = np.mean(data_y_peak  - multi_bi_gaussian(data_x_peak, *mbg_params))
-
 
             spectrum.peaks[peak].A_refined = spectrum.peaks[peak].A_refined + (peak_error/10)
             mbg_params[i*4] = spectrum.peaks[peak].A_refined
@@ -151,12 +138,13 @@ def refine_peak_parameters(working_peak_list, mbg_params, spectrum:MSData):
             data_y_R = data_y[R_mask]
 
             if len(data_x_L) == 0 or len(data_x_R) == 0 or len(data_y_L) == 0 or len(data_y_R) == 0:
-                print(f"masking error for peak {peak} block 2, iteration {k}")
-                print(f"Peak {peak}: x0 = {x0_fit:.3f}, sigma_L = {sigma_L_fit:.3f}, sigma_R = {sigma_R_fit:.3f}")
-                print(f"L_mask: {L_mask}, R_mask: {R_mask}")
-                print(f"data_x_L: {data_x_L}, data_y_L: {data_y_L}, data_x_R: {data_x_R}, data_y_R: {data_y_R}")
-                print(f"data_x_peak: {data_x_peak}, data_y_peak: {data_y_peak}")
-                print(f"data_x: {data_x}, data_y: {data_y}")
+                log(f"masking error for peak {peak} block 2, iteration {k}")
+                log(f"Peak {peak}: x0 = {x0_fit:.3f}, sigma_L = {sigma_L_fit:.3f}, sigma_R = {sigma_R_fit:.3f}")
+                log(f"L_mask: {L_mask}, R_mask: {R_mask}")
+                log(f"data_x_L: {data_x_L}, data_y_L: {data_y_L}, data_x_R: {data_x_R}, data_y_R: {data_y_R}")
+                log(f"data_x_peak: {data_x_peak}, data_y_peak: {data_y_peak}")
+                log(f"data_x: {data_x}, data_y: {data_y}")
+                log(f"Error while fitting")
                 return False
             
             mbg_L =  multi_bi_gaussian(data_x_L , *mbg_params)
@@ -184,7 +172,6 @@ def refine_peak_parameters(working_peak_list, mbg_params, spectrum:MSData):
             if sigma_R_fit < 1:
                 sigma_R_fit = original_peak.width * 1.5
             
-
             spectrum.peaks[peak].sigma_L = sigma_L_fit
             spectrum.peaks[peak].sigma_R = sigma_R_fit
             spectrum.peaks[peak].x0_refined = x0_fit
@@ -192,6 +179,10 @@ def refine_peak_parameters(working_peak_list, mbg_params, spectrum:MSData):
             mbg_params[i*4 + 2] = sigma_L_fit
             mbg_params[i*4 + 3] = sigma_R_fit
             mbg_params[i*4 + 1] = x0_fit
+    
+    for peak in working_peak_list:
+        spectrum.peaks[peak].fitted = True
+
     return True
 
             

@@ -1,12 +1,10 @@
-from turtle import update
 import dearpygui.dearpygui as dpg
-from sympy import use
 from modules.data_structures import MSData, peak_params
 from typing import Tuple
 from scipy.signal import find_peaks
 import numpy as np
 from modules.dpg_draw import log
-from modules.render_callback import RenderCallback
+from modules.rendercallback import RenderCallback
 
 def add_peak(sender, app_data, user_data:RenderCallback):
     spectrum = user_data.spectrum
@@ -25,7 +23,8 @@ def add_peak(sender, app_data, user_data:RenderCallback):
 
     spectrum.peaks[new_peak_index] = new_peak
 
-    dpg.add_drag_line(label=f"{new_peak_index}", parent="data_plot", color=[255, 0, 255, 255], default_value=mid_spectra, callback=drag_peak_callback, user_data=(user_data, new_peak_index))
+    dpg.add_drag_line(label=f"{new_peak_index}", tag = f"drag_line_{new_peak_index}", parent="data_plot", color=[255, 0, 255, 255], default_value=mid_spectra, callback=drag_peak_callback, user_data=(user_data, new_peak_index))
+    update_user_peaks_table(user_data)
 
 def drag_peak_callback(sender, app_data, user_data:RenderCallback):
     spectrum = user_data[0].spectrum
@@ -41,14 +40,31 @@ def update_user_peaks_table(user_data:RenderCallback):
     spectrum = user_data.spectrum
     dpg.delete_item("user_peak_table", children_only=True)
     
-    dpg.add_table_column(label="Peak Label", parent="user_peak_table")
+    dpg.add_table_column(label="#", parent="user_peak_table", width=50)
     dpg.add_table_column(label="x0", parent="user_peak_table")
+    dpg.add_table_column(label="Width", parent="user_peak_table", width=100)
+    dpg.add_table_column(label="Del", parent="user_peak_table")
     
     for peaks in spectrum.peaks:
         if spectrum.peaks[peaks].user_added:
             with dpg.table_row(parent="user_peak_table"):
                 dpg.add_text(f"{peaks}")
-                dpg.add_text(f"{spectrum.peaks[peaks].x0_init}")
+                dpg.add_text(f"{spectrum.peaks[peaks].x0_init:.1f}")
+                #dpg.add_text(f"{spectrum.peaks[peaks].width:.2f}")
+                dpg.add_input_int(label="", default_value=int(spectrum.peaks[peaks].width), width=80, tag=f"width_{peaks}", callback=update_peak_width_callback, user_data=(user_data, peaks))
+                dpg.add_button(label="Del", callback=delete_user_peak_callback, user_data=(user_data, peaks))
+
+def update_peak_width_callback(sender, app_data, user_data:Tuple[RenderCallback, int]):
+    spectrum = user_data[0].spectrum
+    peak = user_data[1]
+    pass
+
+def delete_user_peak_callback(sender, app_data, user_data:Tuple[RenderCallback, int]):
+    spectrum = user_data[0].spectrum
+    peak = user_data[1]
+    del spectrum.peaks[peak]
+    update_user_peaks_table(user_data[0])
+    dpg.delete_item(f"drag_line_{peak}")
 
 def peaks_finder_callback(sender, app_data, user_data:RenderCallback):
     spectrum = user_data.spectrum
@@ -68,12 +84,16 @@ def update_found_peaks_table(user_data:RenderCallback):
     spectrum = user_data.spectrum
     dpg.delete_item("found_peak_table", children_only=True)
 
-    dpg.add_table_column(label="Peak Label", parent="found_peak_table")
+    dpg.add_table_column(label="#", parent="found_peak_table")
+    dpg.add_table_column(label="x0", parent="found_peak_table")
+    dpg.add_table_column(label="Width", parent="found_peak_table")
     dpg.add_table_column(label="Use", parent="found_peak_table")
     
     for peaks in spectrum.peaks:
         with dpg.table_row(parent="found_peak_table"):
             dpg.add_text(f"{peaks}")
+            dpg.add_text(f"{spectrum.peaks[peaks].x0_init:.1f}")
+            dpg.add_text(f"{spectrum.peaks[peaks].width:.2f}")
             checked = not spectrum.peaks[peaks].do_not_fit
             dpg.add_checkbox(label="", default_value=checked, callback=tick_peak_callback, user_data=(user_data, peaks))
 

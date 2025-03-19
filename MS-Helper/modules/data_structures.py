@@ -3,6 +3,7 @@ from scipy.signal import savgol_filter
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass
+from modules.helpers import multi_bi_gaussian
 
 from typing import Dict, Tuple
 from time import time 
@@ -55,8 +56,21 @@ class MSData():
     
     def request_baseline_update(self) -> None:
         self.baseline_need_update = True
-        
-
+    
+    def calculate_mbg(self, data_x: np.ndarray) -> np.ndarray:
+        mbg_params = []
+        for peak in self.peaks:
+            if self.peaks[peak].do_not_fit:
+                continue
+            if self.peaks[peak].fitted:
+                mbg_params.append(self.peaks[peak].A_refined)
+                mbg_params.append(self.peaks[peak].x0_refined)
+                mbg_params.append(self.peaks[peak].sigma_L)
+                mbg_params.append(self.peaks[peak].sigma_R )
+            
+        mbg = multi_bi_gaussian(data_x, *mbg_params)
+        return mbg
+ 
 @dataclass
 class peak_params:
     A_init: float
