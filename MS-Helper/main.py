@@ -2,6 +2,7 @@ import dearpygui.dearpygui as dpg
 from modules.data_structures import MSData
 from modules.finding import peaks_finder_callback, add_peak
 from modules.fitting import  draw_fitted_peaks, run_fitting
+from modules.matching import matching_window
 from modules.dpg_draw import *
 from modules.var import colors_list
 from modules.render_callback import RenderCallback
@@ -101,41 +102,7 @@ with dpg.window(label="Peak fitting", width=1430, height=800, pos=(0,85), no_clo
             dpg.add_table_column(label="Peak Apex")
             dpg.add_table_column(label="Peak Integral")
 
-with dpg.window(label="Peak matching", width=1430, height=850, pos=(0,110), no_close=True, no_move=True, no_resize=True, tag="Peak matching", collapsed=True):
-    # Create a plot for the raw data
-    with dpg.plot(label="Peak matching", width=1430, height=700, tag="peak_matching_plot") as plot2:
-        # Add x and y axes
-        dpg.add_plot_axis(dpg.mvXAxis, label="m/z", tag="x_axis_plot3")
-        dpg.add_plot_axis(dpg.mvYAxis, label="Y Axis", tag="y_axis_plot3")
-        dpg.add_line_series(spectrum.baseline_corrected[:,0], spectrum.baseline_corrected[:,1], label="Corrected Data Series", parent="y_axis_plot3", tag="corrected_series_plot3")
-    
-    with dpg.group(horizontal=True, horizontal_spacing= 25):
-        with dpg.group(horizontal=False):
-            dpg.add_button(label="Show fitted peaks", callback=update_peak_starting_points, user_data=render_callback)
-            dpg.add_text("Peaks Start:")
-            dpg.add_input_int(label="Lower  %", default_value=1,min_value=1 , max_value=100, tag="lower_bound", width=100)
-            dpg.add_input_int(label="Upper  %", default_value=20, min_value=1 , max_value=100, tag="upper_bound", width=100)
-            dpg.add_checkbox(label="Show Centers instead", default_value=False, tag="show_centers", callback=update_peak_starting_points, user_data=render_callback)
-            dpg.add_input_int(label="Width", default_value=1, min_value=1 , max_value=100, tag="center_width", width=100)
-            
-        for i in range(5):
-            with dpg.child_window(height=200, width=220, tag = f"theorical_peaks_window_{i}"):
-                with dpg.theme(tag=f"theme_peak_window_{i}"):
-                    with dpg.theme_component():
-                        dpg.add_theme_color(dpg.mvThemeCol_Border, colors_list[i], category=dpg.mvThemeCat_Core)
-                
-                dpg.add_text(f"Peak Set {i}", tag=f"rmsd_{i}")
-                
-                with dpg.group(horizontal=True):
-                    dpg.add_input_int(label="MW", default_value=549000, tag=f"molecular_weight_{i}", step = 100, width = 125, callback=draw_mz_lines, user_data=(render_callback, i))
-                    dpg.add_text("", tag = f"MW_diff_{i}")
-                
-                dpg.add_input_int(label="Charges", default_value=52, tag=f"charges_{i}", width = 125, callback=draw_mz_lines,  user_data=(render_callback, i))
-                dpg.add_input_int(label="# Peaks", default_value=5, tag=f"nb_peak_show_{i}",step = 1, width = 125, callback=draw_mz_lines, user_data=(render_callback, i))
-                dpg.add_table(header_row=False, row_background=True, tag=f"theorical_peak_table_{i}")
-                #dpg.add_table(header_row=True, tag=f"theorical_peak_table_{i}_2")
-                dpg.bind_item_theme(f"theorical_peaks_window_{i}", f"theme_peak_window_{i}")
-
+matching_window(render_callback)
 
         
 

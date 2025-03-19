@@ -115,7 +115,7 @@ def peaks_finder(spectrum:MSData, threshold:int, width:int, max_width:int, dista
         width = peaks_data["widths"][i] * sampling_rate
         if width > max_width:
             width = max_width
-        print(f"Peak {i}: x = {spectrum.working_data[:,0][peak]:.3f}, width = {width:.3f}")
+
         new_peak = peak_params(A_init=spectrum.working_data[:,1][peak], x0_init=spectrum.working_data[:,0][peak], width=width)
         spectrum.peaks[new_peak_index] = new_peak
         new_peak_index += 1

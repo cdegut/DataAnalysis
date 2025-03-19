@@ -90,14 +90,12 @@ def rolling_window_fit(spectrum:MSData):
         i += 1
     fitted_peak_list = working_peak_list
 
-    refine_peak_parameters(fitted_peak_list, mbg_param, spectrum)   
+    fit = refine_peak_parameters(fitted_peak_list, mbg_param, spectrum)   
+    if fit:
+        print("Fitting done with no error")
     draw_fitted_peaks(None, None, spectrum)
 
 def refine_peak_parameters(working_peak_list, mbg_params, spectrum:MSData):
-
-    ###
-    # NaN bug seems to come from bad starting parameters for Sigma_L and Sigma_R
-    ###
     
     original_peaks: Tuple[int, peak_params] = {peak:spectrum.peaks[peak] for peak in working_peak_list}
     data_x = spectrum.working_data[:,0]
@@ -122,32 +120,45 @@ def refine_peak_parameters(working_peak_list, mbg_params, spectrum:MSData):
 
         for i in iterations_list:
             peak = working_peak_list[i]
+            original_peak = original_peaks[peak]
             x0_fit = spectrum.peaks[peak].x0_refined
             sigma_L_fit = spectrum.peaks[peak].sigma_L
             sigma_R_fit = spectrum.peaks[peak].sigma_R
-            if k <= 2:
-                print(f"Peak {peak}: x0 = {x0_fit:.3f}, sigma_L = {sigma_L_fit:.3f}, sigma_R = {sigma_R_fit:.3f}")
 
-            mask = (data_x >= x0_fit - sigma_R_fit%4) & (data_x <= x0_fit + sigma_L_fit%4)
+            mask = (data_x >= x0_fit - sigma_R_fit/4) & (data_x <= x0_fit + sigma_L_fit/4)
             data_x_peak = data_x[mask]
             data_y_peak = data_y[mask]
+            
+            if len(data_x_peak) == 0 or len(data_y_peak) == 0:
+                print(f"masking error for peak {peak} block 1")              
+                continue
 
-            try:
-                peak_error = np.mean(data_y_peak  - multi_bi_gaussian(data_x_peak, *mbg_params))
-            except:
-                exit()
+            peak_error = np.mean(data_y_peak  - multi_bi_gaussian(data_x_peak, *mbg_params))
+
 
             spectrum.peaks[peak].A_refined = spectrum.peaks[peak].A_refined + (peak_error/10)
             mbg_params[i*4] = spectrum.peaks[peak].A_refined
 
-            # Sharpen the peak           
-            L_mask = (data_x >= x0_fit - sigma_L_fit) & (data_x <= x0_fit - sigma_L_fit)
-            R_mask = (data_x >= x0_fit + sigma_R_fit) & (data_x <= x0_fit + sigma_R_fit)
+            # Sharpen the peak
+            L_window = original_peak.sigma_L
+            R_window = original_peak.sigma_R       
+            L_mask = (data_x >= x0_fit - L_window) & (data_x <= x0_fit - L_window/4)
+            R_mask = (data_x >= x0_fit + R_window/4) & (data_x <= x0_fit + R_window)
 
             data_x_L = data_x[L_mask]
             data_y_L = data_y[L_mask]
             data_x_R = data_x[R_mask]
             data_y_R = data_y[R_mask]
+
+            if len(data_x_L) == 0 or len(data_x_R) == 0 or len(data_y_L) == 0 or len(data_y_R) == 0:
+                print(f"masking error for peak {peak} block 2, iteration {k}")
+                print(f"Peak {peak}: x0 = {x0_fit:.3f}, sigma_L = {sigma_L_fit:.3f}, sigma_R = {sigma_R_fit:.3f}")
+                print(f"L_mask: {L_mask}, R_mask: {R_mask}")
+                print(f"data_x_L: {data_x_L}, data_y_L: {data_y_L}, data_x_R: {data_x_R}, data_y_R: {data_y_R}")
+                print(f"data_x_peak: {data_x_peak}, data_y_peak: {data_y_peak}")
+                print(f"data_x: {data_x}, data_y: {data_y}")
+                return False
+            
             mbg_L =  multi_bi_gaussian(data_x_L , *mbg_params)
             mbg_R = multi_bi_gaussian(data_x_R, *mbg_params)
 
@@ -162,8 +173,7 @@ def refine_peak_parameters(working_peak_list, mbg_params, spectrum:MSData):
             else:
                 sigma_L_fit = sigma_L_fit + error_l/1000
                 sigma_R_fit = sigma_R_fit + error_r/1000
-            
-            original_peak = original_peaks[peak]
+                      
 
             if sigma_L_fit > original_peak.width*4:
                 sigma_L_fit = sigma_L_fit/2
@@ -182,6 +192,7 @@ def refine_peak_parameters(working_peak_list, mbg_params, spectrum:MSData):
             mbg_params[i*4 + 2] = sigma_L_fit
             mbg_params[i*4 + 3] = sigma_R_fit
             mbg_params[i*4 + 1] = x0_fit
+    return True
 
             
 def update_peak_params(peak_list, popt, spectrum:MSData):
